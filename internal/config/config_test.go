@@ -95,6 +95,32 @@ func TestDefaultPathUsesXDG(t *testing.T) {
 	}
 }
 
+func TestProfileNames(t *testing.T) {
+	clearJ4AEnv(t)
+	path := writeConfig(t, `
+[default]
+host = "jira.example"
+
+[profiles.zeta]
+host = "zeta.example"
+
+[profiles.alpha]
+host = "alpha.example"
+`)
+	names, err := ProfileNames(Options{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(names, ","); got != "alpha,zeta" {
+		t.Fatalf("ProfileNames() = %q, want alpha,zeta", got)
+	}
+
+	names, err = ProfileNames(Options{ConfigPath: filepath.Join(t.TempDir(), "missing.toml")})
+	if err != nil || len(names) != 0 {
+		t.Fatalf("ProfileNames(missing) = %v, %v; want empty", names, err)
+	}
+}
+
 func TestPlaintextSecretRequiresPrivatePermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows permissions use ACLs")

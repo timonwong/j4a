@@ -78,7 +78,6 @@ func (a *app) rootCommand() *cobra.Command {
 	root.SetIn(a.stdin)
 	root.SetOut(a.stdout)
 	root.SetErr(a.stderr)
-	root.CompletionOptions.DisableDefaultCmd = true
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return apperr.Wrap(apperr.KindInvalidInput, err, "invalid command flags")
 	})
@@ -104,6 +103,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.myselfCommand(),
 		a.schemaCommand(),
 	)
+	a.configureCompletions(root)
 	return root
 }
 

@@ -155,6 +155,41 @@ j4a fields list --custom
 j4a cache fields refresh
 ```
 
+## Shell completion
+
+`j4a` uses Cobra's native completion support for Bash, Zsh, Fish, and
+PowerShell. Generate and load the script for the current session with one of:
+
+```sh
+# Bash
+source <(j4a completion bash)
+
+# Zsh (requires compinit)
+source <(j4a completion zsh)
+
+# Fish
+j4a completion fish | source
+
+# PowerShell
+j4a completion powershell | Out-String | Invoke-Expression
+```
+
+For normal use, generate the script once into the shell's completion directory
+instead of running `j4a` during every shell startup. For example:
+
+```sh
+mkdir -p ~/.zsh/completions
+j4a completion zsh > ~/.zsh/completions/_j4a
+# Add ~/.zsh/completions to fpath before running compinit in ~/.zshrc.
+
+mkdir -p ~/.config/fish/completions
+j4a completion fish > ~/.config/fish/completions/j4a.fish
+```
+
+Completion covers commands, aliases, flags, enum values, local input paths,
+and named Profiles from the selected config file. It does not contact Jira or
+read credentials from the OS keyring.
+
 ## Structured output
 
 Text is always the default. These forms are equivalent:
@@ -184,8 +219,9 @@ written to stderr and paired with stable exit codes. Human-readable warnings
 are written to stderr. `--raw` bypasses j4a's schema and emits the Jira REST
 response unchanged.
 
-`j4a schema` describes commands, flags, mutation status, output shapes, and
-exit codes as machine-readable JSON.
+`j4a schema` describes automation-facing Jira commands, flags, mutation
+status, output shapes, and exit codes as machine-readable JSON. Shell
+completion commands emit shell code and are outside that contract.
 
 ## Custom fields
 

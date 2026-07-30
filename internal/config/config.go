@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -152,6 +153,25 @@ func Load(options Options, store SecretStore) (Settings, error) {
 // has been saved.
 func LoadForDisplay(options Options) (Settings, error) {
 	return load(options, nil, false)
+}
+
+// ProfileNames returns the sorted named Profiles from the selected config
+// file without resolving credentials or accessing the OS keyring.
+func ProfileNames(options Options) ([]string, error) {
+	path, err := configPath(options)
+	if err != nil {
+		return nil, err
+	}
+	file, err := readFile(path)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(file.Profiles))
+	for name := range file.Profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func load(options Options, store SecretStore, resolveSecrets bool) (Settings, error) {
