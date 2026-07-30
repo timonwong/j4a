@@ -29,7 +29,6 @@ type app struct {
 	username   string
 	authType   string
 	output     string
-	json       bool
 	raw        bool
 	quiet      bool
 }
@@ -85,7 +84,6 @@ func (a *app) rootCommand() *cobra.Command {
 	flags.StringVar(&a.username, "username", "", "Jira username for Basic Auth")
 	flags.StringVar(&a.authType, "auth-type", "", "authentication type: basic or pat")
 	flags.StringVarP(&a.output, "output", "o", "text", "output format: text or json")
-	flags.BoolVar(&a.json, "json", false, "shortcut for --output=json")
 	flags.BoolVar(&a.raw, "raw", false, "emit the unmodified Jira REST response")
 	flags.BoolVar(&a.quiet, "quiet", false, "suppress successful text output")
 
@@ -106,16 +104,7 @@ func (a *app) renderer() (output.Renderer, error) {
 	if a.output == "raw" && !a.raw {
 		return output.Renderer{}, apperr.New(apperr.KindInvalidInput, "use --raw instead of --output=raw")
 	}
-	if a.json && a.raw {
-		return output.Renderer{}, apperr.New(apperr.KindInvalidInput, "--json and --raw are mutually exclusive")
-	}
 	formatValue := a.output
-	if a.json {
-		if formatValue != "" && formatValue != "text" && formatValue != "json" {
-			return output.Renderer{}, apperr.New(apperr.KindInvalidInput, "--json conflicts with --output")
-		}
-		formatValue = "json"
-	}
 	if a.raw {
 		if formatValue != "" && formatValue != "text" && formatValue != "raw" {
 			return output.Renderer{}, apperr.New(apperr.KindInvalidInput, "--raw conflicts with --output")

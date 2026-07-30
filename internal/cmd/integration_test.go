@@ -83,7 +83,7 @@ func TestJSONErrorUsesStderrAndExitCode(t *testing.T) {
 	defer server.Close()
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "--json", "myself"}, strings.NewReader(""), stdout, stderr)
+	code := Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "-ojson", "myself"}, strings.NewReader(""), stdout, stderr)
 	if code != 3 || stdout.Len() != 0 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -130,7 +130,7 @@ func TestCustomFieldAliasAndMarkdownCreate(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "--json", "issues", "create",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
 		"--project", "OPS", "--type", "Story", "--summary", "Structured output",
 		"--description", "# Header", "--input-format=markdown", "--field", "story-points=5",
 	}, strings.NewReader(""), stdout, stderr)
@@ -147,7 +147,7 @@ func TestReadOnlyBlocksMutationAndInputConflict(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, true), "--json", "issues", "comment", "OPS-1", "--body", "blocked",
+		"--config", writeCLIConfig(t, server.URL, true), "-ojson", "issues", "comment", "OPS-1", "--body", "blocked",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 2 || calls.Load() != 0 {
 		t.Fatalf("read-only code=%d calls=%d stdout=%s stderr=%s", code, calls.Load(), stdout.String(), stderr.String())
@@ -156,7 +156,7 @@ func TestReadOnlyBlocksMutationAndInputConflict(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	code = Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "--json", "issues", "comment", "OPS-1",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "comment", "OPS-1",
 		"--body", "inline", "--body-file", "-",
 	}, strings.NewReader("file"), stdout, stderr)
 	if code != 2 || calls.Load() != 0 {
@@ -171,7 +171,7 @@ func TestReadOnlyBlocksBeforeCredentialResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"--config", path, "--json", "issues", "comment", "OPS-1", "--body", "blocked"}, strings.NewReader(""), stdout, stderr)
+	code := Execute([]string{"--config", path, "-ojson", "issues", "comment", "OPS-1", "--body", "blocked"}, strings.NewReader(""), stdout, stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "read_only") {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -235,7 +235,7 @@ func TestRawAndSchema(t *testing.T) {
 func TestMissingRequiredFlagIsInputError(t *testing.T) {
 	clearCommandEnv(t)
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"--json", "issues", "create", "--project", "OPS"}, strings.NewReader(""), stdout, stderr)
+	code := Execute([]string{"-ojson", "issues", "create", "--project", "OPS"}, strings.NewReader(""), stdout, stderr)
 	if code != 2 || stdout.Len() != 0 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -249,6 +249,13 @@ func TestMissingRequiredFlagIsInputError(t *testing.T) {
 	}
 	if envelope.Error.Kind != "invalid_input" {
 		t.Fatalf("error = %+v", envelope.Error)
+	}
+}
+
+func TestJSONShortcutIsNotRegistered(t *testing.T) {
+	a := &app{stdin: strings.NewReader(""), stdout: io.Discard, stderr: io.Discard}
+	if flag := a.rootCommand().PersistentFlags().Lookup("json"); flag != nil {
+		t.Fatalf("json flag remains registered: %+v", flag)
 	}
 }
 

@@ -103,7 +103,7 @@ func TestLoginInteractiveBasicAndJSON(t *testing.T) {
 	store := newMemorySecretStore()
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := &app{stdin: strings.NewReader(""), stdout: stdout, stderr: stderr, terminal: terminal, secretStore: store}
-	if code := a.execute([]string{"--config", path, "--json", "login"}); code != 0 {
+	if code := a.execute([]string{"--config", path, "-ojson", "login"}); code != 0 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	var envelope struct {
@@ -184,7 +184,7 @@ func TestLoginNonTTYEnvironmentAndStdin(t *testing.T) {
 		t.Setenv("J4A_PASSWORD", "env-password")
 		path := filepath.Join(t.TempDir(), "config.toml")
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-		code := Execute([]string{"--config", path, "--json", "login", "--use-keyring=false"}, strings.NewReader("stdin-password"), stdout, stderr)
+		code := Execute([]string{"--config", path, "-ojson", "login", "--use-keyring=false"}, strings.NewReader("stdin-password"), stdout, stderr)
 		if code != 0 || stderr.Len() != 0 {
 			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
@@ -271,7 +271,7 @@ func TestLoginMissingInputAndUnauthorizedDoNotCommit(t *testing.T) {
 		store := newMemorySecretStore()
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 		a := &app{stdin: strings.NewReader("bad-token"), stdout: stdout, stderr: stderr, secretStore: store}
-		code := a.execute([]string{"--config", path, "--json", "login"})
+		code := a.execute([]string{"--config", path, "-ojson", "login"})
 		if code != 3 || !strings.Contains(stderr.String(), `"kind":"auth"`) || store.setCalls != 0 {
 			t.Fatalf("code=%d store=%+v stdout=%s stderr=%s", code, store, stdout.String(), stderr.String())
 		}
@@ -308,7 +308,7 @@ func TestLoginLogoutRawAndLogoutIdempotence(t *testing.T) {
 		stdout.Reset()
 		stderr.Reset()
 		a = &app{stdin: strings.NewReader(""), stdout: stdout, stderr: stderr, secretStore: store}
-		code := a.execute([]string{"--config", path, "--json", "logout"})
+		code := a.execute([]string{"--config", path, "-ojson", "logout"})
 		if code != 0 || stderr.Len() != 0 {
 			t.Fatalf("logout %d code=%d stdout=%s stderr=%s", index, code, stdout.String(), stderr.String())
 		}
@@ -335,7 +335,7 @@ func TestLogoutMissingProfileIsConfigError(t *testing.T) {
 	path := writeAuthConfig(t, "[default]\nhost = \"https://jira.example\"\nauth_type = \"pat\"\nuse_keyring = true\n")
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := &app{stdin: strings.NewReader(""), stdout: stdout, stderr: stderr, secretStore: newMemorySecretStore()}
-	if code := a.execute([]string{"--config", path, "--profile", "missing", "--json", "logout"}); code != 2 || !strings.Contains(stderr.String(), `"kind":"config"`) {
+	if code := a.execute([]string{"--config", path, "--profile", "missing", "-ojson", "logout"}); code != 2 || !strings.Contains(stderr.String(), `"kind":"config"`) {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 }

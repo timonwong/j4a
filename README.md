@@ -141,7 +141,6 @@ j4a issues list -o json
 j4a issues list -ojson
 j4a issues list --output json
 j4a issues list --output=json
-j4a issues list --json
 ```
 
 Normalized JSON uses a stable envelope:
