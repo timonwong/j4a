@@ -16,6 +16,8 @@ import (
 	"github.com/timonwong/j4a/internal/output"
 )
 
+var version = "dev"
+
 type app struct {
 	stdin  io.Reader
 	stdout io.Writer
@@ -65,7 +67,7 @@ func (a *app) rootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "j4a",
 		Short:         "A scriptable Jira CLI for humans and AI agents",
-		Version:       "dev",
+		Version:       version,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {

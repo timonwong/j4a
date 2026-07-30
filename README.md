@@ -23,6 +23,28 @@ make build
 ./bin/j4a --help
 ```
 
+## Install from a release
+
+[GitHub Releases](https://github.com/timonwong/j4a/releases) provides standalone
+binaries for Linux, macOS, and Windows on amd64 and arm64. Download the asset
+matching your operating system and architecture. On Linux and macOS, make it
+executable and optionally rename it:
+
+```sh
+chmod +x j4a_v0.1.0_darwin_arm64
+mv j4a_v0.1.0_darwin_arm64 j4a
+./j4a --version
+```
+
+Each release also includes a SHA-256 checksum file. Verify the matching entry
+before installing the binary. For example, on macOS:
+
+```sh
+grep 'j4a_v0.1.0_darwin_arm64$' j4a_v0.1.0_checksums.txt | shasum -a 256 -c -
+```
+
+On Linux, use `sha256sum -c -` in place of `shasum -a 256 -c -`.
+
 ## Login and configuration
 
 The default config path is `$XDG_CONFIG_HOME/j4a/config.toml`, falling back to

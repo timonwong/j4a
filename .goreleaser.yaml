@@ -1,0 +1,39 @@
+version: 2
+
+project_name: j4a
+
+builds:
+  - id: j4a
+    main: ./cmd/j4a
+    binary: j4a
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/timonwong/j4a/internal/cmd.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - ids:
+      - j4a
+    formats:
+      - binary
+    name_template: "{{ .ProjectName }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Tag }}_checksums.txt"
+  algorithm: sha256
+
+changelog:
+  use: github-native
+
+release:
+  prerelease: auto

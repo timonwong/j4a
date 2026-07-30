@@ -16,6 +16,22 @@ import (
 	"github.com/timonwong/j4a/internal/fieldcache"
 )
 
+func TestVersion(t *testing.T) {
+	if version != "dev" {
+		t.Fatalf("default version = %q, want dev", version)
+	}
+
+	originalVersion := version
+	version = "1.2.3-test"
+	t.Cleanup(func() { version = originalVersion })
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{"--version"}, strings.NewReader(""), stdout, stderr)
+	if code != 0 || stdout.String() != "j4a version 1.2.3-test\n" || stderr.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestJSONOutputAndBasicAuth(t *testing.T) {
 	clearCommandEnv(t)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
