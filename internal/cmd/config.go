@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,149 +11,299 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/timonwong/j4a/internal/apperr"
 	"github.com/timonwong/j4a/internal/config"
+	"github.com/timonwong/j4a/internal/jira"
 	"github.com/timonwong/j4a/internal/output"
 	"golang.org/x/term"
 )
 
-func (a *app) configCommand() *cobra.Command {
-	command := &cobra.Command{Use: "config", Short: "Inspect and manage j4a configuration"}
-	command.AddCommand(
-		a.configShowCommand(),
-		a.configPathCommand(),
-		a.configSetSecretCommand(),
-		a.configDeleteSecretCommand(),
-	)
-	return command
+type loginTerminal interface {
+	IsTerminal() bool
+	Prompt(label, defaultValue string) (string, error)
+	PromptSecret(label string) (string, error)
 }
 
-func (a *app) configShowCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "show",
-		Short: "Show resolved non-secret configuration",
+type streamLoginTerminal struct {
+	input  io.Reader
+	output io.Writer
+	reader *bufio.Reader
+	file   *os.File
+}
+
+func newLoginTerminal(input io.Reader, output io.Writer) loginTerminal {
+	terminal := &streamLoginTerminal{input: input, output: output, reader: bufio.NewReader(input)}
+	if file, ok := input.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
+		terminal.file = file
+	}
+	return terminal
+}
+
+func (t *streamLoginTerminal) IsTerminal() bool { return t.file != nil }
+
+func (t *streamLoginTerminal) Prompt(label, defaultValue string) (string, error) {
+	if defaultValue == "" {
+		_, _ = fmt.Fprintf(t.output, "%s: ", label)
+	} else {
+		_, _ = fmt.Fprintf(t.output, "%s [%s]: ", label, defaultValue)
+	}
+	value, err := t.reader.ReadString('\n')
+	if err != nil && !(err == io.EOF && value != "") {
+		return "", apperr.Wrap(apperr.KindInvalidInput, err, "read %s", strings.ToLower(label))
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = defaultValue
+	}
+	return value, nil
+}
+
+func (t *streamLoginTerminal) PromptSecret(label string) (string, error) {
+	if t.file == nil {
+		return "", apperr.New(apperr.KindInvalidInput, "credential prompt requires a terminal")
+	}
+	_, _ = fmt.Fprintf(t.output, "%s: ", label)
+	secret, err := term.ReadPassword(int(t.file.Fd()))
+	_, _ = fmt.Fprintln(t.output)
+	if err != nil {
+		return "", apperr.Wrap(apperr.KindInvalidInput, err, "read credential")
+	}
+	return string(secret), nil
+}
+
+type loginResult struct {
+	Profile         string          `json:"profile"`
+	Host            string          `json:"host"`
+	AuthType        config.AuthType `json:"authType"`
+	CredentialStore string          `json:"credentialStore"`
+	User            jira.User       `json:"user"`
+}
+
+type logoutResult struct {
+	Profile                     string `json:"profile"`
+	CredentialStore             string `json:"credentialStore"`
+	CredentialRemoved           bool   `json:"credentialRemoved"`
+	EnvironmentCredentialActive bool   `json:"environmentCredentialActive"`
+}
+
+func (a *app) loginCommand() *cobra.Command {
+	useKeyring := true
+	command := &cobra.Command{
+		Use:   "login",
+		Short: "Authenticate and save a Jira Profile",
 		Args:  exactArgs(0),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if isRaw(a) {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for config commands")
+		RunE: func(command *cobra.Command, _ []string) error {
+			if a.raw {
+				return apperr.New(apperr.KindInvalidInput, "--raw is not available for login")
 			}
-			settings, err := config.LoadForDisplay(a.configOptions())
+			draft, err := config.LoadDraft(a.configOptions())
 			if err != nil {
 				return err
 			}
-			masked := settings.Masked()
-			return a.render(masked, output.Table{
+			candidate, err := a.loginCandidate(draft, useKeyring)
+			if err != nil {
+				return err
+			}
+			user, err := verifyLogin(command.Context(), candidate)
+			if err != nil {
+				return err
+			}
+			if err := config.CommitLogin(draft, candidate, a.secretStore); err != nil {
+				return err
+			}
+			store := credentialStore(candidate.UseKeyring)
+			result := loginResult{
+				Profile: profileName(candidate.Profile), Host: candidate.Host,
+				AuthType: candidate.AuthType, CredentialStore: store, User: user,
+			}
+			return a.render(result, output.Table{
 				Headers: []string{"FIELD", "VALUE"},
 				Rows: [][]string{
-					{"Profile", masked.Profile}, {"Host", masked.Host}, {"Username", masked.Username},
-					{"Auth Type", string(masked.AuthType)}, {"API Version", fmt.Sprint(masked.APIVersion)},
-					{"Read Only", fmt.Sprint(masked.ReadOnly)}, {"Use Keyring", fmt.Sprint(masked.UseKeyring)},
-					{"Password", masked.Password}, {"Token", masked.Token},
+					{"Profile", result.Profile}, {"Host", result.Host},
+					{"Auth Type", string(result.AuthType)}, {"Credential Store", result.CredentialStore},
+					{"User", displayUser(result.User)},
+				},
+			})
+		},
+	}
+	command.Flags().BoolVar(&useKeyring, "use-keyring", true, "store the credential in the OS keyring; false stores it in the 0600 config file")
+	return command
+}
+
+func (a *app) logoutCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "logout",
+		Short: "Remove a Jira Profile credential",
+		Args:  exactArgs(0),
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if a.raw {
+				return apperr.New(apperr.KindInvalidInput, "--raw is not available for logout")
+			}
+			removed, err := config.Logout(a.configOptions(), a.secretStore)
+			if err != nil {
+				return err
+			}
+			selectedProfile := a.profile
+			if selectedProfile == "" {
+				selectedProfile = os.Getenv("J4A_PROFILE")
+			}
+			result := logoutResult{
+				Profile: profileName(selectedProfile), CredentialStore: removed.CredentialStore,
+				CredentialRemoved:           removed.CredentialRemoved,
+				EnvironmentCredentialActive: os.Getenv("J4A_PASSWORD") != "" || os.Getenv("J4A_TOKEN") != "",
+			}
+			return a.render(result, output.Table{
+				Headers: []string{"FIELD", "VALUE"},
+				Rows: [][]string{
+					{"Profile", result.Profile}, {"Credential Store", result.CredentialStore},
+					{"Credential Removed", fmt.Sprint(result.CredentialRemoved)},
+					{"Environment Credential Active", fmt.Sprint(result.EnvironmentCredentialActive)},
 				},
 			})
 		},
 	}
 }
 
-func (a *app) configPathCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "path",
-		Short: "Print the resolved config file path",
-		Args:  exactArgs(0),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if isRaw(a) {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for config commands")
-			}
-			path, err := a.resolvedConfigPath()
-			if err != nil {
-				return err
-			}
-			return a.renderMessage(map[string]string{"path": path}, path)
-		},
+func (a *app) loginCandidate(draft config.Draft, useKeyring bool) (config.Settings, error) {
+	candidate := draft.Settings
+	// Login credentials are always fresh. In particular, never reuse a secret
+	// from an existing Profile while constructing or verifying the candidate.
+	candidate.Password = ""
+	candidate.Token = ""
+	candidate.UseKeyring = useKeyring
+	if candidate.APIVersion == 0 {
+		candidate.APIVersion = 2
 	}
-}
+	if !draft.Exists && !a.terminal.IsTerminal() && strings.TrimSpace(a.authType) == "" && strings.TrimSpace(os.Getenv("J4A_AUTH_TYPE")) == "" {
+		candidate.AuthType = ""
+	}
 
-func (a *app) configSetSecretCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "set-secret",
-		Short: "Store the active profile credential in the OS keyring",
-		Args:  exactArgs(0),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if isRaw(a) {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for config commands")
-			}
-			settings, err := config.LoadForDisplay(a.configOptions())
-			if err != nil {
-				return err
-			}
-			if !settings.UseKeyring {
-				return apperr.New(apperr.KindConfig, "set use_keyring = true before storing a keyring credential")
-			}
-			secret, err := a.readSecret(settings.AuthType)
-			if err != nil {
-				return err
-			}
-			if err := config.SetSecret(nil, settings, secret); err != nil {
-				return err
-			}
-			return a.renderMessage(map[string]any{"stored": true, "profile": settings.Profile}, "Credential stored in OS keyring")
-		},
-	}
-}
-
-func (a *app) configDeleteSecretCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "delete-secret",
-		Short: "Remove the active profile credential from the OS keyring",
-		Args:  exactArgs(0),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if isRaw(a) {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for config commands")
-			}
-			settings, err := config.LoadForDisplay(a.configOptions())
-			if err != nil {
-				return err
-			}
-			if err := config.DeleteSecret(nil, settings); err != nil {
-				return err
-			}
-			return a.renderMessage(map[string]any{"deleted": true, "profile": settings.Profile}, "Credential removed from OS keyring")
-		},
-	}
-}
-
-func (a *app) resolvedConfigPath() (string, error) {
-	if a.configPath != "" {
-		return a.configPath, nil
-	}
-	if path := os.Getenv("J4A_CONFIG_FILE"); path != "" {
-		return path, nil
-	}
-	if path := os.Getenv("J4A_CONFIG"); path != "" {
-		return path, nil
-	}
-	return config.DefaultPath()
-}
-
-func (a *app) readSecret(auth config.AuthType) (string, error) {
-	label := "Password"
-	if auth == config.AuthPAT {
-		label = "Token"
-	}
-	if file, ok := a.stdin.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
-		_, _ = fmt.Fprintf(a.stderr, "%s: ", label)
-		secret, err := term.ReadPassword(int(file.Fd()))
-		_, _ = fmt.Fprintln(a.stderr)
+	var secret string
+	var err error
+	if a.terminal.IsTerminal() {
+		candidate.Host, err = a.terminal.Prompt("Host", candidate.Host)
 		if err != nil {
-			return "", apperr.Wrap(apperr.KindInvalidInput, err, "read credential")
+			return config.Settings{}, err
 		}
-		return string(secret), nil
+		authDefault := string(candidate.AuthType)
+		if !draft.Exists {
+			authDefault = ""
+		}
+		auth, promptErr := a.terminal.Prompt("Auth type (basic/pat)", authDefault)
+		if promptErr != nil {
+			return config.Settings{}, promptErr
+		}
+		candidate.AuthType = config.AuthType(strings.ToLower(strings.TrimSpace(auth)))
+		if candidate.AuthType == config.AuthBasic {
+			candidate.Username, err = a.terminal.Prompt("Username", candidate.Username)
+			if err != nil {
+				return config.Settings{}, err
+			}
+		} else {
+			candidate.Username = ""
+		}
+		if err := normalizeLoginFields(&candidate); err != nil {
+			return config.Settings{}, err
+		}
+		secret, err = a.terminal.PromptSecret(secretLabel(candidate.AuthType))
+	} else {
+		if err := normalizeLoginFields(&candidate); err != nil {
+			return config.Settings{}, err
+		}
+		secret, err = a.nonTerminalSecret(candidate.AuthType)
+	}
+	if err != nil {
+		return config.Settings{}, err
+	}
+	if secret == "" {
+		return config.Settings{}, apperr.New(apperr.KindInvalidInput, strings.ToLower(secretLabel(candidate.AuthType))+" must not be empty")
+	}
+	if candidate.AuthType == config.AuthPAT {
+		candidate.Token = secret
+	} else {
+		candidate.Password = secret
+	}
+	return candidate, nil
+}
+
+func normalizeLoginFields(candidate *config.Settings) error {
+	if candidate.APIVersion != 2 {
+		return apperr.New(apperr.KindConfig, "j4a v1 supports Jira REST API version 2 only")
+	}
+	if strings.TrimSpace(candidate.Host) == "" {
+		return apperr.New(apperr.KindInvalidInput, "host is required")
+	}
+	host, err := config.NormalizeHost(candidate.Host)
+	if err != nil {
+		return apperr.New(apperr.KindInvalidInput, apperr.As(err).Error())
+	}
+	candidate.Host = host
+	if candidate.AuthType != config.AuthBasic && candidate.AuthType != config.AuthPAT {
+		return apperr.New(apperr.KindInvalidInput, "auth type must be basic or pat")
+	}
+	if candidate.AuthType == config.AuthBasic && strings.TrimSpace(candidate.Username) == "" {
+		return apperr.New(apperr.KindInvalidInput, "username is required for basic authentication")
+	}
+	return nil
+}
+
+func (a *app) nonTerminalSecret(auth config.AuthType) (string, error) {
+	name := "J4A_PASSWORD"
+	if auth == config.AuthPAT {
+		name = "J4A_TOKEN"
+	}
+	if secret := os.Getenv(name); secret != "" {
+		return secret, nil
 	}
 	secret, err := io.ReadAll(a.stdin)
 	if err != nil {
 		return "", apperr.Wrap(apperr.KindInvalidInput, err, "read credential from stdin")
 	}
-	value := strings.TrimRight(string(secret), "\r\n")
-	if value == "" {
-		return "", apperr.New(apperr.KindInvalidInput, strings.ToLower(label)+" must not be empty")
+	return strings.TrimRight(string(secret), "\r\n"), nil
+}
+
+func verifyLogin(ctx context.Context, candidate config.Settings) (jira.User, error) {
+	clientConfig := jira.Config{BaseURL: candidate.Host, Username: candidate.Username}
+	if candidate.AuthType == config.AuthPAT {
+		clientConfig.PAT = candidate.Token
+	} else {
+		clientConfig.Password = candidate.Password
 	}
-	return value, nil
+	client, err := jira.NewClient(clientConfig)
+	if err != nil {
+		return jira.User{}, err
+	}
+	return client.Myself(ctx)
+}
+
+func secretLabel(auth config.AuthType) string {
+	if auth == config.AuthPAT {
+		return "Token"
+	}
+	return "Password"
+}
+
+func credentialStore(useKeyring bool) string {
+	if useKeyring {
+		return "keyring"
+	}
+	return "config"
+}
+
+func profileName(profile string) string {
+	if strings.TrimSpace(profile) == "" {
+		return "default"
+	}
+	return profile
+}
+
+func displayUser(user jira.User) string {
+	if user.DisplayName != "" && user.Username != "" && user.DisplayName != user.Username {
+		return fmt.Sprintf("%s (%s)", user.DisplayName, user.Username)
+	}
+	if user.DisplayName != "" {
+		return user.DisplayName
+	}
+	if user.Username != "" {
+		return user.Username
+	}
+	return user.AccountID
 }

@@ -23,13 +23,45 @@ make build
 ./bin/j4a --help
 ```
 
-## Configuration
+## Login and configuration
 
 The default config path is `$XDG_CONFIG_HOME/j4a/config.toml`, falling back to
 `~/.config/j4a/config.toml`.
 
-If the TOML contains `password` or `token`, j4a requires the file to have mode
-`0600` on Unix-like systems.
+Run `j4a login` for the default Profile or select a named Profile with
+`--profile`. Login prompts for connection fields and a fresh credential,
+verifies it with Jira, and only then updates the Profile. A new Profile must
+explicitly select `basic` or `pat`; j4a does not guess an authentication type.
+
+```sh
+j4a login
+j4a login --profile bot
+```
+
+Credentials are stored in the OS keyring by default. Each Profile owns an
+independent keyring credential. To store the credential in the TOML instead,
+explicitly disable the keyring; j4a then requires the file to have mode `0600`
+on Unix-like systems.
+
+Any manually maintained TOML containing `password` or `token` is subject to the
+same `0600` requirement.
+
+```sh
+j4a login --use-keyring=false
+```
+
+Remove a Profile's persisted credential without deleting its non-secret
+configuration:
+
+```sh
+j4a logout
+j4a logout --profile bot
+```
+
+`logout` cannot unset `J4A_PASSWORD` or `J4A_TOKEN` inherited from the shell and
+will report when one of those environment credentials remains active.
+
+The config file can also be maintained manually:
 
 ```toml
 [default]
@@ -62,12 +94,15 @@ Secret precedence is environment, OS keyring, then TOML. When
 `use_keyring = true`, a missing keyring entry is an error and j4a does not
 silently fall back to a plaintext TOML secret.
 
-Store or remove the active profile's secret without placing it in process
-arguments:
+For non-interactive login, provide connection fields with flags or environment
+variables and provide the secret through `J4A_PASSWORD` / `J4A_TOKEN` or stdin.
+Secrets are never accepted as command-line arguments.
 
 ```sh
-j4a config set-secret
-j4a config delete-secret
+printf '%s' "$JIRA_PAT" | j4a login \
+  --profile bot \
+  --host https://jira.example.com \
+  --auth-type pat
 ```
 
 ## Commands

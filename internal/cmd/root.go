@@ -20,6 +20,9 @@ type app struct {
 	stdout io.Writer
 	stderr io.Writer
 
+	terminal    loginTerminal
+	secretStore config.SecretStore
+
 	configPath string
 	profile    string
 	host       string
@@ -34,13 +37,20 @@ type app struct {
 // Execute runs j4a and returns a stable process exit code.
 func Execute(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	a := &app{stdin: stdin, stdout: stdout, stderr: stderr}
+	return a.execute(args)
+}
+
+func (a *app) execute(args []string) int {
+	if a.terminal == nil {
+		a.terminal = newLoginTerminal(a.stdin, a.stderr)
+	}
 	root := a.rootCommand()
 	root.SetArgs(args)
 	if err := root.Execute(); err != nil {
 		renderer, renderErr := a.renderer()
 		if renderErr != nil {
 			err = renderErr
-			renderer = output.New(stdout, stderr, output.FormatText, false)
+			renderer = output.New(a.stdout, a.stderr, output.FormatText, false)
 		}
 		_ = renderer.Error(err)
 		return apperr.ExitCode(err)
@@ -80,12 +90,13 @@ func (a *app) rootCommand() *cobra.Command {
 	flags.BoolVar(&a.quiet, "quiet", false, "suppress successful text output")
 
 	root.AddCommand(
+		a.loginCommand(),
+		a.logoutCommand(),
 		a.issuesCommand(),
 		a.projectsCommand(),
 		a.fieldsCommand(),
 		a.searchCommand(),
 		a.myselfCommand(),
-		a.configCommand(),
 		a.schemaCommand(),
 	)
 	return root

@@ -9,8 +9,20 @@ A Jira Data Center or Server deployment addressed by one base URL.
 _Avoid_: Site, server, host
 
 **Profile**:
-A named set of connection and authentication settings for one Jira Instance.
+A named set of connection and authentication settings for one Jira Instance. A Profile may own one persisted Credential.
 _Avoid_: Account, environment
+
+**Credential**:
+A secret that proves a Profile may act as a Jira user, represented by either a Basic Auth password or a Personal Access Token.
+_Avoid_: Session, account
+
+**Login**:
+The local operation that verifies a fresh Credential with a Jira Instance and associates it with a Profile. It does not create a persistent Jira server session.
+_Avoid_: Session creation, browser login
+
+**Logout**:
+The local removal of a Profile's persisted Credential. It does not revoke a Jira Personal Access Token or unset credentials supplied by the environment.
+_Avoid_: Token revocation, session expiry
 
 **Issue Key**:
 The human-readable Jira identifier for an issue, such as `PROJ-123`.

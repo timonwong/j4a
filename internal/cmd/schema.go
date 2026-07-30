@@ -62,7 +62,7 @@ func (a *app) schemaCommand() *cobra.Command {
 
 func schemaDocument() cliSchema {
 	return cliSchema{
-		ContractVersion: "1",
+		ContractVersion: "2",
 		Program:         "j4a",
 		Platform:        "Jira Data Center/Server REST API v2",
 		GlobalFlags: []flagSchema{
@@ -72,6 +72,8 @@ func schemaDocument() cliSchema {
 			flag("raw", "", "boolean"), flag("quiet", "", "boolean"),
 		},
 		Commands: []commandSchema{
+			{Name: "login", Auth: false, Mutating: true, Flags: []flagSchema{flagDefault("use-keyring", "", "boolean", true)}, JSONData: object("profile", "host", "authType", "credentialStore", "user")},
+			{Name: "logout", Auth: false, Mutating: true, JSONData: object("profile", "credentialStore", "credentialRemoved", "environmentCredentialActive")},
 			command("myself", false, "", object("accountId", "username", "displayName", "emailAddress", "active")),
 			commandWithFlags("issues list", []string{"issue list"}, false, "", []flagSchema{
 				flag("project", "p", "string"), flag("status", "", "string"), flag("assignee", "", "string"),
@@ -107,10 +109,6 @@ func schemaDocument() cliSchema {
 			}, object("projects")),
 			commandWithFlags("projects show", []string{"project show"}, false, "PROJECT-KEY", nil, object("id", "key", "name", "description", "projectType", "lead")),
 			commandWithFlags("fields list", []string{"field list"}, false, "", []flagSchema{flag("custom", "", "boolean")}, object("fields")),
-			{Name: "config show", Auth: false, Mutating: false, JSONData: object("profile", "host", "username", "authType", "apiVersion", "readOnly", "useKeyring")},
-			{Name: "config path", Auth: false, Mutating: false, JSONData: object("path")},
-			{Name: "config set-secret", Auth: false, Mutating: true, JSONData: object("stored", "profile")},
-			{Name: "config delete-secret", Auth: false, Mutating: true, JSONData: object("deleted", "profile")},
 			{Name: "schema", Auth: false, Mutating: false, JSONData: object("contractVersion", "program", "platform", "globalFlags", "commands", "output", "exitCodes")},
 		},
 		Output: outputSchema{

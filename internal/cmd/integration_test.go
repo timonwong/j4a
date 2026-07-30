@@ -200,14 +200,35 @@ func TestRawAndSchema(t *testing.T) {
 		SchemaVersion string `json:"schemaVersion"`
 		Data          struct {
 			ContractVersion string `json:"contractVersion"`
-			Commands        []any  `json:"commands"`
+			Commands        []struct {
+				Name     string `json:"name"`
+				Auth     bool   `json:"auth"`
+				Mutating bool   `json:"mutating"`
+			} `json:"commands"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.SchemaVersion != "1" || envelope.Data.ContractVersion != "1" || len(envelope.Data.Commands) == 0 {
+	if envelope.SchemaVersion != "1" || envelope.Data.ContractVersion != "2" || len(envelope.Data.Commands) == 0 {
 		t.Fatalf("schema = %+v", envelope)
+	}
+	commands := make(map[string]struct {
+		auth, mutating bool
+	})
+	for _, command := range envelope.Data.Commands {
+		commands[command.Name] = struct {
+			auth, mutating bool
+		}{command.Auth, command.Mutating}
+		if strings.HasPrefix(command.Name, "config") {
+			t.Fatalf("removed config command remains in schema: %q", command.Name)
+		}
+	}
+	for _, name := range []string{"login", "logout"} {
+		metadata, ok := commands[name]
+		if !ok || metadata.auth || !metadata.mutating {
+			t.Fatalf("%s schema = %+v, present=%t", name, metadata, ok)
+		}
 	}
 }
 
