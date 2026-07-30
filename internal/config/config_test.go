@@ -120,7 +120,7 @@ token = "toml-token"
 use_keyring = true
 `)
 	settings := Settings{Host: "https://jira.example", AuthType: AuthPAT}
-	store := &memoryStore{secrets: map[string]string{KeyringService + "/" + KeyringAccount(settings.Host, settings.Username, settings.AuthType): "keyring-token"}}
+	store := &memoryStore{secrets: map[string]string{KeyringService + "/" + KeyringAccount(settings.Profile): "keyring-token"}}
 	tests := []struct {
 		name     string
 		env      map[string]string
@@ -205,13 +205,13 @@ func TestConfigErrorsAndSecretHelpers(t *testing.T) {
 	if err := SetSecret(store, settings, "password"); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := store.Get(KeyringService, KeyringAccount("jira.example", "alice", AuthBasic)); err != nil || got != "password" {
+	if got, err := store.Get(KeyringService, KeyringAccount(settings.Profile)); err != nil || got != "password" {
 		t.Fatalf("stored secret = %q, %v", got, err)
 	}
 	if err := DeleteSecret(store, settings); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Get(KeyringService, KeyringAccount("jira.example", "alice", AuthBasic)); !errors.Is(err, ErrSecretNotFound) {
+	if _, err := store.Get(KeyringService, KeyringAccount(settings.Profile)); !errors.Is(err, ErrSecretNotFound) {
 		t.Fatalf("secret was not deleted: %v", err)
 	}
 }

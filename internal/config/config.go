@@ -56,6 +56,24 @@ type Settings struct {
 	Token      string   `json:"-"`
 }
 
+// Draft is a possibly incomplete login candidate plus an immutable snapshot
+// of the config source it was read from. Exists reports whether the selected
+// [default] or [profiles.NAME] table already exists.
+type Draft struct {
+	Settings Settings
+	Exists   bool
+
+	source              configSource
+	persistedUseKeyring bool
+}
+
+// LogoutResult reports which persistent credential store was selected and
+// whether a credential was actually removed.
+type LogoutResult struct {
+	CredentialStore   string `json:"credentialStore"`
+	CredentialRemoved bool   `json:"credentialRemoved"`
+}
+
 // Secret returns the credential appropriate for the configured auth type.
 func (s Settings) Secret() string {
 	if s.AuthType == AuthPAT {
@@ -64,7 +82,7 @@ func (s Settings) Secret() string {
 	return s.Password
 }
 
-// MaskedSettings is safe to render from commands such as config show.
+// MaskedSettings is a non-secret view that is safe to render or inspect.
 type MaskedSettings struct {
 	Profile    string   `json:"profile,omitempty"`
 	Host       string   `json:"host"`
@@ -130,8 +148,8 @@ func Load(options Options, store SecretStore) (Settings, error) {
 }
 
 // LoadForDisplay resolves non-secret settings without accessing the OS keyring.
-// It is intended for config show, which must be able to render a masked view
-// even when no credential has been saved yet.
+// It is intended for local validation paths that must work before a credential
+// has been saved.
 func LoadForDisplay(options Options) (Settings, error) {
 	return load(options, nil, false)
 }
@@ -153,7 +171,7 @@ func load(options Options, store SecretStore, resolveSecrets bool) (Settings, er
 		if !ok {
 			return Settings{}, apperr.New(apperr.KindConfig, fmt.Sprintf("profile %q not found", profile))
 		}
-		values = merge(values, selected)
+		values = mergeProfile(values, selected)
 	}
 	environment, err := environmentValues()
 	if err != nil {
@@ -271,7 +289,7 @@ func resolveSecret(settings *Settings, store SecretStore, envSecret string) erro
 	if store == nil {
 		store = OSSecretStore{}
 	}
-	secret, err := store.Get(KeyringService, KeyringAccount(settings.Host, settings.Username, settings.AuthType))
+	secret, err := store.Get(KeyringService, KeyringAccount(settings.Profile))
 	if errors.Is(err, ErrSecretNotFound) {
 		return apperr.New(apperr.KindConfig, "credential is not present in the OS keyring")
 	}
@@ -341,15 +359,14 @@ func NormalizeHost(raw string) (string, error) {
 	return u.String(), nil
 }
 
-// KeyringAccount deterministically identifies one credential for a Jira
-// Instance, username, and auth type. It deliberately uses the normalized URL
-// so equivalent spelling cannot create duplicate keychain entries.
-func KeyringAccount(host, username string, auth AuthType) string {
-	normalized, err := NormalizeHost(host)
-	if err != nil {
-		normalized = strings.TrimSpace(strings.ToLower(host))
+// KeyringAccount identifies the credential owned by one Profile. The empty
+// Profile name is the default Profile. Legacy host|username|auth accounts are
+// deliberately neither read nor migrated.
+func KeyringAccount(profile string) string {
+	if profile == "" {
+		return "default"
 	}
-	return normalized + "|" + strings.TrimSpace(username) + "|" + string(auth)
+	return "profile:" + profile
 }
 
 // SetSecret writes the current auth credential to the configured secret store.
@@ -360,7 +377,7 @@ func SetSecret(store SecretStore, settings Settings, secret string) error {
 	if strings.TrimSpace(secret) == "" {
 		return apperr.New(apperr.KindInvalidInput, "secret must not be empty")
 	}
-	if err := store.Set(KeyringService, KeyringAccount(settings.Host, settings.Username, settings.AuthType), secret); err != nil {
+	if err := store.Set(KeyringService, KeyringAccount(settings.Profile), secret); err != nil {
 		return apperr.Wrap(apperr.KindConfig, err, "store credential in OS keyring")
 	}
 	return nil
@@ -371,7 +388,7 @@ func DeleteSecret(store SecretStore, settings Settings) error {
 	if store == nil {
 		store = OSSecretStore{}
 	}
-	if err := store.Delete(KeyringService, KeyringAccount(settings.Host, settings.Username, settings.AuthType)); err != nil {
+	if err := store.Delete(KeyringService, KeyringAccount(settings.Profile)); err != nil {
 		return apperr.Wrap(apperr.KindConfig, err, "delete credential from OS keyring")
 	}
 	return nil
@@ -384,8 +401,9 @@ type values struct {
 }
 
 type fileConfig struct {
-	Default  values
-	Profiles map[string]values
+	Default       values
+	DefaultExists bool
+	Profiles      map[string]values
 }
 
 func (f fileConfig) hasPlaintextSecret() bool {
@@ -431,6 +449,14 @@ func merge(base, override values) values {
 		result.useKeyring = override.useKeyring
 	}
 	return result
+}
+
+func mergeProfile(base, override values) values {
+	// A named Profile may inherit non-secret defaults, but credentials belong
+	// to the Profile itself and must never fall through from [default].
+	base.password = nil
+	base.token = nil
+	return merge(base, override)
 }
 
 func environmentValues() (values, error) {
