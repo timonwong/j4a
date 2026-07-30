@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/timonwong/j4a/internal/apperr"
+	"github.com/timonwong/j4a/internal/config"
 	"github.com/timonwong/j4a/internal/jira"
 	"github.com/timonwong/j4a/internal/markup"
 )
@@ -52,7 +53,7 @@ func parseInputFormat(value string) (markup.InputFormat, error) {
 	}
 }
 
-func resolveFields(ctx context.Context, client *jira.Client, values []string) (map[string]any, error) {
+func (a *app) resolveFields(ctx context.Context, client *jira.Client, settings config.Settings, values []string) (map[string]any, error) {
 	parsed, err := jira.ParseFieldValues(values)
 	if err != nil {
 		return nil, err
@@ -67,22 +68,36 @@ func resolveFields(ctx context.Context, client *jira.Client, values []string) (m
 			break
 		}
 	}
-	var metadata []jira.Field
+	var metadata customFieldMetadata
 	if needsMetadata {
-		metadata, err = client.ListFields(ctx)
+		metadata, err = a.loadCustomFieldMetadata(ctx, client, settings)
 		if err != nil {
 			return nil, err
 		}
 	}
-	resolved := make(map[string]any, len(parsed))
-	for key, value := range parsed {
-		id, err := jira.ResolveCustomField(key, metadata)
-		if err != nil {
-			return nil, err
+	resolve := func(fields []jira.Field) (map[string]any, error) {
+		resolved := make(map[string]any, len(parsed))
+		for key, value := range parsed {
+			id, err := jira.ResolveCustomField(key, fields)
+			if err != nil {
+				return nil, err
+			}
+			resolved[id] = value
 		}
-		resolved[id] = value
+		return resolved, nil
 	}
-	return resolved, nil
+	resolved, resolutionErr := resolve(metadata.fields)
+	if resolutionErr == nil || !needsMetadata || metadata.refreshAttempted {
+		return resolved, resolutionErr
+	}
+	refreshed, cacheErr, refreshErr := a.fetchCustomFieldMetadata(ctx, client, settings, metadata.principal)
+	if refreshErr != nil {
+		return nil, apperr.New(apperr.KindInvalidInput, fmt.Sprintf("%v; live custom field refresh failed: %v", resolutionErr, refreshErr))
+	}
+	if cacheErr != nil {
+		a.addFieldCacheWriteWarning(refreshed.path, cacheErr)
+	}
+	return resolve(refreshed.fields)
 }
 
 func jqlLiteral(value string) string {

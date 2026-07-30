@@ -38,10 +38,19 @@ func ParseFormat(value string) (Format, error) {
 // Renderer writes command results. Quiet suppresses successful text only;
 // structured output and errors remain available to scripts.
 type Renderer struct {
-	Stdout io.Writer
-	Stderr io.Writer
-	Format Format
-	Quiet  bool
+	Stdout   io.Writer
+	Stderr   io.Writer
+	Format   Format
+	Quiet    bool
+	warnings []Warning
+}
+
+// Warning describes a non-fatal condition encountered while producing a
+// successful result.
+type Warning struct {
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 // New creates a renderer. Nil streams are discarded, which is useful in tests.
@@ -58,9 +67,17 @@ func New(stdout, stderr io.Writer, format Format, quiet bool) Renderer {
 	return Renderer{Stdout: stdout, Stderr: stderr, Format: format, Quiet: quiet}
 }
 
+// WithWarnings returns a copy of r that includes warnings with its successful
+// output. Warnings are emitted in JSON and text modes; raw output is unchanged.
+func (r Renderer) WithWarnings(warnings ...Warning) Renderer {
+	r.warnings = append([]Warning(nil), warnings...)
+	return r
+}
+
 type successEnvelope struct {
-	SchemaVersion string `json:"schemaVersion"`
-	Data          any    `json:"data"`
+	SchemaVersion string    `json:"schemaVersion"`
+	Data          any       `json:"data"`
+	Warnings      []Warning `json:"warnings,omitempty"`
 }
 
 type errorEnvelope struct {
@@ -79,10 +96,15 @@ type errorBody struct {
 func (r Renderer) Success(data any) error {
 	switch r.Format {
 	case FormatJSON:
-		return writeJSON(r.Stdout, successEnvelope{SchemaVersion: SchemaVersion, Data: data})
+		return writeJSON(r.Stdout, successEnvelope{SchemaVersion: SchemaVersion, Data: data, Warnings: r.warnings})
 	case FormatRaw:
 		return r.Raw(data)
 	case FormatText, "":
+		for _, warning := range r.warnings {
+			if _, err := fmt.Fprintf(r.Stderr, "warning: %s\n", warning.Message); err != nil {
+				return err
+			}
+		}
 		if r.Quiet {
 			return nil
 		}

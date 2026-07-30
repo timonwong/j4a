@@ -43,6 +43,7 @@ type outputSchema struct {
 	ErrorStream   string `json:"errorStream"`
 	Raw           string `json:"raw"`
 	SchemaVersion string `json:"schemaVersion"`
+	Warnings      string `json:"warnings"`
 }
 
 func (a *app) schemaCommand() *cobra.Command {
@@ -68,10 +69,11 @@ func schemaDocument() cliSchema {
 		GlobalFlags: []flagSchema{
 			flag("config", "c", "path"), flag("profile", "", "string"), flag("host", "", "url"),
 			flag("username", "", "string"), flag("auth-type", "", "enum:basic|pat"),
-			flagDefault("output", "o", "enum:text|json", "text"), flag("json", "", "boolean"),
-			flag("raw", "", "boolean"), flag("quiet", "", "boolean"),
+			flagDefault("output", "o", "enum:text|json", "text"), flag("raw", "", "boolean"),
+			flag("quiet", "", "boolean"),
 		},
 		Commands: []commandSchema{
+			commandWithFlags("cache fields refresh", []string{"cache field refresh"}, true, "", nil, object("refreshed", "path", "fieldCount", "fetchedAt", "expiresAt", "instance", "principal")),
 			{Name: "login", Auth: false, Mutating: true, Flags: []flagSchema{flagDefault("use-keyring", "", "boolean", true)}, JSONData: object("profile", "host", "authType", "credentialStore", "user")},
 			{Name: "logout", Auth: false, Mutating: true, JSONData: object("profile", "credentialStore", "credentialRemoved", "environmentCredentialActive")},
 			command("myself", false, "", object("accountId", "username", "displayName", "emailAddress", "active")),
@@ -112,10 +114,10 @@ func schemaDocument() cliSchema {
 			{Name: "schema", Auth: false, Mutating: false, JSONData: object("contractVersion", "program", "platform", "globalFlags", "commands", "output", "exitCodes")},
 		},
 		Output: outputSchema{
-			Default: "text", JSONEnvelope: `{"schemaVersion":"1","data":...}`,
+			Default: "text", JSONEnvelope: `{"schemaVersion":"1","data":...,"warnings":[...]?}`,
 			ErrorEnvelope: `{"schemaVersion":"1","error":{"kind":...,"message":...}}`,
 			SuccessStream: "stdout", ErrorStream: "stderr", Raw: "unmodified Jira REST response",
-			SchemaVersion: output.SchemaVersion,
+			SchemaVersion: output.SchemaVersion, Warnings: "non-fatal success conditions; JSON envelope or text stderr",
 		},
 		ExitCodes: map[string]string{
 			"0": "success", "1": "unexpected error", "2": "invalid input or config", "3": "authentication failed",

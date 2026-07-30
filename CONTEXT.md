@@ -36,6 +36,14 @@ _Avoid_: Custom field key
 A j4a-friendly slug derived from a custom field's display name, such as `story-points`.
 _Avoid_: Custom Field ID, field name
 
+**Principal**:
+The Jira user identity authenticated for one operation, independent of the local Profile and Credential used to prove it.
+_Avoid_: Profile, Credential, account
+
+**Field Metadata Snapshot**:
+A time-bounded copy of the custom fields visible to one Principal on one Jira Instance. It is disposable and is not the source of truth.
+_Avoid_: Field configuration, field registry
+
 **Jira Markup**:
 Jira's wiki-style text notation accepted directly by Jira Data Center and Server rich-text fields.
 _Avoid_: Jira Markdown, wiki Markdown

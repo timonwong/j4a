@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/timonwong/j4a/internal/fieldcache"
 )
 
 func TestJSONOutputAndBasicAuth(t *testing.T) {
@@ -105,6 +107,8 @@ func TestCustomFieldAliasAndMarkdownCreate(t *testing.T) {
 	var fieldCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
+		case "/rest/api/2/myself":
+			_, _ = io.WriteString(writer, `{"accountId":"account-alice","name":"alice","displayName":"Alice","active":true}`)
 		case "/rest/api/2/field":
 			fieldCalls.Add(1)
 			_, _ = io.WriteString(writer, `[{"id":"customfield_10006","name":"Story Points","custom":true,"schema":{"type":"number"}}]`)
@@ -129,11 +133,12 @@ func TestCustomFieldAliasAndMarkdownCreate(t *testing.T) {
 	defer server.Close()
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{
+	a := &app{stdin: strings.NewReader(""), stdout: stdout, stderr: stderr, fieldStore: fieldcache.New(t.TempDir(), nil)}
+	code := a.execute([]string{
 		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
 		"--project", "OPS", "--type", "Story", "--summary", "Structured output",
 		"--description", "# Header", "--input-format=markdown", "--field", "story-points=5",
-	}, strings.NewReader(""), stdout, stderr)
+	})
 	if code != 0 || stderr.Len() != 0 || fieldCalls.Load() != 1 {
 		t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, fieldCalls.Load(), stdout.String(), stderr.String())
 	}
@@ -229,6 +234,9 @@ func TestRawAndSchema(t *testing.T) {
 		if !ok || metadata.auth || !metadata.mutating {
 			t.Fatalf("%s schema = %+v, present=%t", name, metadata, ok)
 		}
+	}
+	if metadata, ok := commands["cache fields refresh"]; !ok || !metadata.auth || !metadata.mutating {
+		t.Fatalf("cache fields refresh schema = %+v, present=%t", metadata, ok)
 	}
 }
 

@@ -170,7 +170,7 @@ func (a *app) fieldsListCommand() *cobra.Command {
 		Short: "List Jira fields",
 		Args:  exactArgs(0),
 		RunE: func(command *cobra.Command, _ []string) error {
-			client, _, err := a.client()
+			client, settings, err := a.client()
 			if err != nil {
 				return err
 			}
@@ -180,18 +180,18 @@ func (a *app) fieldsListCommand() *cobra.Command {
 				}
 				return a.rawRequest(command.Context(), client, http.MethodGet, "rest/api/2/field", nil, nil)
 			}
-			fields, err := client.ListFields(command.Context())
-			if err != nil {
-				return err
-			}
+			var fields []jira.Field
 			if customOnly {
-				filtered := fields[:0]
-				for _, field := range fields {
-					if field.Custom {
-						filtered = append(filtered, field)
-					}
+				metadata, err := a.loadCustomFieldMetadata(command.Context(), client, settings)
+				if err != nil {
+					return err
 				}
-				fields = filtered
+				fields = metadata.fields
+			} else {
+				fields, err = client.ListFields(command.Context())
+				if err != nil {
+					return err
+				}
 			}
 			type fieldView struct {
 				ID     string `json:"id"`

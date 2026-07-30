@@ -124,7 +124,7 @@ func (a *app) issueCreateCommand() *cobra.Command {
 			if strings.TrimSpace(project) == "" || strings.TrimSpace(issueType) == "" || strings.TrimSpace(summary) == "" {
 				return apperr.New(apperr.KindInvalidInput, "project, type, and summary are required")
 			}
-			client, _, err := a.writableClient()
+			client, settings, err := a.writableClient()
 			if err != nil {
 				return err
 			}
@@ -140,7 +140,7 @@ func (a *app) issueCreateCommand() *cobra.Command {
 				converted := markup.ToJira(*descriptionValue, format)
 				descriptionValue = &converted
 			}
-			resolvedFields, err := resolveFields(command.Context(), client, fields)
+			resolvedFields, err := a.resolveFields(command.Context(), client, settings, fields)
 			if err != nil {
 				return err
 			}
@@ -183,7 +183,7 @@ func (a *app) issueUpdateCommand() *cobra.Command {
 		Short: "Update an issue",
 		Args:  exactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			client, _, err := a.writableClient()
+			client, settings, err := a.writableClient()
 			if err != nil {
 				return err
 			}
@@ -199,7 +199,7 @@ func (a *app) issueUpdateCommand() *cobra.Command {
 				converted := markup.ToJira(*descriptionValue, format)
 				descriptionValue = &converted
 			}
-			resolvedFields, err := resolveFields(command.Context(), client, fields)
+			resolvedFields, err := a.resolveFields(command.Context(), client, settings, fields)
 			if err != nil {
 				return err
 			}
@@ -355,7 +355,7 @@ func (a *app) issueTransitionCommand() *cobra.Command {
 			if strings.TrimSpace(target) == "" {
 				return apperr.New(apperr.KindInvalidInput, "--to is required")
 			}
-			client, _, err := a.writableClient()
+			client, settings, err := a.writableClient()
 			if err != nil {
 				return err
 			}
@@ -367,7 +367,7 @@ func (a *app) issueTransitionCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resolvedFields, err := resolveFields(command.Context(), client, fields)
+			resolvedFields, err := a.resolveFields(command.Context(), client, settings, fields)
 			if err != nil {
 				return err
 			}

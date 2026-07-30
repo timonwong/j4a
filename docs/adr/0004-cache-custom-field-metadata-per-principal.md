@@ -1,0 +1,3 @@
+# Cache custom field metadata per principal
+
+j4a keeps a disposable 24-hour snapshot of custom field IDs, names, aliases, and types for each Jira Instance and authenticated Principal instead of querying `/field` for every alias. Direct `customfield_*` IDs still bypass metadata entirely; when an expired snapshot cannot be refreshed, j4a deliberately allows even mutating commands to use it but reports the risk through a structured warning. Principal isolation prevents field visibility from one Jira user leaking into another user's resolution, while an explicit `cache fields refresh` command restores a known-live snapshot.

@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/timonwong/j4a/internal/apperr"
 	"github.com/timonwong/j4a/internal/config"
+	"github.com/timonwong/j4a/internal/fieldcache"
 	"github.com/timonwong/j4a/internal/jira"
 	"github.com/timonwong/j4a/internal/output"
 )
@@ -22,6 +23,8 @@ type app struct {
 
 	terminal    loginTerminal
 	secretStore config.SecretStore
+	fieldStore  fieldcache.Store
+	warnings    []output.Warning
 
 	configPath string
 	profile    string
@@ -40,6 +43,7 @@ func Execute(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 func (a *app) execute(args []string) int {
+	a.warnings = nil
 	if a.terminal == nil {
 		a.terminal = newLoginTerminal(a.stdin, a.stderr)
 	}
@@ -88,6 +92,7 @@ func (a *app) rootCommand() *cobra.Command {
 	flags.BoolVar(&a.quiet, "quiet", false, "suppress successful text output")
 
 	root.AddCommand(
+		a.cacheCommand(),
 		a.loginCommand(),
 		a.logoutCommand(),
 		a.issuesCommand(),
@@ -115,7 +120,11 @@ func (a *app) renderer() (output.Renderer, error) {
 	if err != nil {
 		return output.Renderer{}, err
 	}
-	return output.New(a.stdout, a.stderr, format, a.quiet), nil
+	return output.New(a.stdout, a.stderr, format, a.quiet).WithWarnings(a.warnings...), nil
+}
+
+func (a *app) addWarning(warning output.Warning) {
+	a.warnings = append(a.warnings, warning)
 }
 
 func (a *app) configOptions() config.Options {

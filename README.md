@@ -130,6 +130,7 @@ j4a issues transition OPS-42 --to "In Review"
 
 j4a projects list
 j4a fields list --custom
+j4a cache fields refresh
 ```
 
 ## Structured output
@@ -149,9 +150,17 @@ Normalized JSON uses a stable envelope:
 {"schemaVersion":"1","data":{"issues":[],"total":0,"startAt":0,"maxResults":50}}
 ```
 
+Successful commands that had to accept a degraded condition add structured
+warnings without changing the exit code:
+
+```json
+{"schemaVersion":"1","data":{"key":"OPS-42","updated":true},"warnings":[{"code":"stale_field_cache","message":"using stale custom field metadata","details":{"fetchedAt":"2026-07-29T10:00:00Z"}}]}
+```
+
 Successful data is written to stdout. In JSON mode, structured failures are
-written to stderr and paired with stable exit codes. `--raw` bypasses j4a's
-schema and emits the Jira REST response unchanged.
+written to stderr and paired with stable exit codes. Human-readable warnings
+are written to stderr. `--raw` bypasses j4a's schema and emits the Jira REST
+response unchanged.
 
 `j4a schema` describes commands, flags, mutation status, output shapes, and
 exit codes as machine-readable JSON.
@@ -169,10 +178,26 @@ j4a issues create \
   --field customfield_10006='{"id":"123"}'
 ```
 
-A direct ID such as `customfield_10006` is used as-is and has priority. A
-human alias such as `story-points` is resolved live from Jira field metadata;
-missing or ambiguous aliases are errors. Values are decoded as JSON first and
-fall back to strings.
+A direct ID such as `customfield_10006` is used as-is and has priority. It does
+not call `/myself`, read the cache, or query Jira field metadata. A human alias
+such as `story-points` is resolved through a 24-hour custom field metadata
+snapshot scoped to the normalized Jira base URL and the Principal returned by
+`/myself`; missing or ambiguous aliases remain errors. Values are decoded as
+JSON first and fall back to strings.
+
+The disposable JSON snapshots live under the platform user cache directory at
+`j4a/fields/hosts/<url-slug+hash>--<principal-slug+hash>.json`. For example,
+macOS uses `~/Library/Caches/j4a/fields/hosts/`. Refresh the current Principal's
+snapshot explicitly with:
+
+```sh
+j4a cache fields refresh
+```
+
+An expired snapshot is refreshed before use. If Jira cannot refresh it, j4a
+continues with the stale mapping, including for issue mutations, and emits a
+warning. `j4a fields list --custom` uses the same snapshot; the complete
+`fields list` and all `--raw` field requests remain live.
 
 ## Jira markup and Markdown
 
