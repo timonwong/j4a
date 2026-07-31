@@ -45,19 +45,19 @@ grep 'jiro_v0.1.0_darwin_arm64$' jiro_v0.1.0_checksums.txt | shasum -a 256 -c -
 
 On Linux, use `sha256sum -c -` in place of `shasum -a 256 -c -`.
 
-## Login and configuration
+## Authentication and configuration
 
 The default config path is `$XDG_CONFIG_HOME/jiro/config.toml`, falling back to
 `~/.config/jiro/config.toml`.
 
-Run `jiro login` for the default Profile or select a named Profile with
+Run `jiro auth login` for the default Profile or select a named Profile with
 `--profile`. Login prompts for connection fields and a fresh credential,
 verifies it with Jira, and only then updates the Profile. A new Profile must
 explicitly select `basic` or `pat`; jiro does not guess an authentication type.
 
 ```sh
-jiro login
-jiro login --profile bot
+jiro auth login
+jiro auth login --profile bot
 ```
 
 Credentials are stored in the OS keyring by default. Each Profile owns an
@@ -69,19 +69,32 @@ Any manually maintained TOML containing `password` or `token` is subject to the
 same `0600` requirement.
 
 ```sh
-jiro login --use-keyring=false
+jiro auth login --use-keyring=false
 ```
 
 Remove a Profile's persisted credential without deleting its non-secret
 configuration:
 
 ```sh
-jiro logout
-jiro logout --profile bot
+jiro auth logout
+jiro auth logout --profile bot
 ```
 
-`logout` cannot unset `JIRO_PASSWORD` or `JIRO_TOKEN` inherited from the shell and
-will report when one of those environment credentials remains active.
+`auth logout` cannot unset `JIRO_PASSWORD` or `JIRO_TOKEN` inherited from the
+shell and will report when one of those environment credentials remains active.
+
+Verify the effective Profile and Credential against Jira with
+`/rest/api/2/myself`:
+
+```sh
+jiro auth status
+jiro auth status --profile bot
+```
+
+`auth status` exits successfully only when Jira accepts the effective
+Credential. Its normalized output includes the Profile, Jira Instance,
+authentication type, and authenticated user without exposing the secret or its
+storage source.
 
 The config file can also be maintained manually:
 
@@ -117,11 +130,11 @@ Secret precedence is environment, OS keyring, then TOML. When
 silently fall back to a plaintext TOML secret.
 
 For non-interactive login, provide connection fields with flags or environment
-variables and provide the secret through `JIRO_PASSWORD` / `JIRO_TOKEN` or stdin.
-Secrets are never accepted as command-line arguments.
+variables and provide the secret through `JIRO_PASSWORD` / `JIRO_TOKEN` or
+stdin. Secrets are never accepted as command-line arguments.
 
 ```sh
-printf '%s' "$JIRA_PAT" | jiro login \
+printf '%s' "$JIRA_PAT" | jiro auth login \
   --profile bot \
   --host https://jira.example.com \
   --auth-type pat

@@ -93,9 +93,8 @@ func (a *app) rootCommand() *cobra.Command {
 	flags.BoolVar(&a.quiet, "quiet", false, "suppress successful text output")
 
 	root.AddCommand(
+		a.authCommand(),
 		a.cacheCommand(),
-		a.loginCommand(),
-		a.logoutCommand(),
 		a.issuesCommand(),
 		a.projectsCommand(),
 		a.fieldsCommand(),
@@ -140,7 +139,7 @@ func (a *app) configOptions() config.Options {
 }
 
 func (a *app) settings() (config.Settings, error) {
-	settings, err := config.Load(a.configOptions(), nil)
+	settings, err := config.Load(a.configOptions(), a.secretStore)
 	if err != nil {
 		return config.Settings{}, err
 	}

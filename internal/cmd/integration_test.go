@@ -317,12 +317,13 @@ func TestRawAndSchema(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.SchemaVersion != "1" || envelope.Data.ContractVersion != "3" || len(envelope.Data.Commands) == 0 {
+	if envelope.SchemaVersion != "1" || envelope.Data.ContractVersion != "4" || len(envelope.Data.Commands) == 0 {
 		t.Fatalf("schema = %+v", envelope)
 	}
 	if envelope.Data.Output.SchemaVersion != "1" ||
 		!strings.Contains(envelope.Data.Output.PartialFailure, "stdout") ||
 		!strings.Contains(envelope.Data.Output.PartialFailure, "stderr") ||
+		!strings.Contains(envelope.Data.Output.RawRestrictions, "auth status") ||
 		!strings.Contains(envelope.Data.Output.RawRestrictions, "bulk-transition") ||
 		envelope.Data.ExitCodes["7"] != "partial failure" {
 		t.Fatalf("output contract = %+v exitCodes=%+v", envelope.Data.Output, envelope.Data.ExitCodes)
@@ -367,6 +368,18 @@ func TestRawAndSchema(t *testing.T) {
 		if strings.HasPrefix(command.Name, "config") {
 			t.Fatalf("removed config command remains in schema: %q", command.Name)
 		}
+		if command.Name == "auth status" {
+			for _, field := range []string{"profile", "instance", "authType", "user"} {
+				if command.JSONData[field] == nil {
+					t.Fatalf("auth status JSON schema is missing %q: %#v", field, command.JSONData)
+				}
+			}
+			for _, field := range []string{"authenticated", "credentialStore"} {
+				if command.JSONData[field] != nil {
+					t.Fatalf("auth status JSON schema unexpectedly includes %q: %#v", field, command.JSONData)
+				}
+			}
+		}
 		if strings.HasPrefix(command.Name, "issues bulk-") {
 			items, ok := command.JSONData["items"].([]any)
 			if !ok || len(items) != 1 {
@@ -378,10 +391,18 @@ func TestRawAndSchema(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"login", "logout"} {
+	for _, name := range []string{"auth login", "auth logout"} {
 		metadata, ok := commands[name]
 		if !ok || metadata.auth || !metadata.mutating {
 			t.Fatalf("%s schema = %+v, present=%t", name, metadata, ok)
+		}
+	}
+	if metadata, ok := commands["auth status"]; !ok || !metadata.auth || metadata.mutating {
+		t.Fatalf("auth status schema = %+v, present=%t", metadata, ok)
+	}
+	for _, name := range []string{"login", "logout"} {
+		if _, ok := commands[name]; ok {
+			t.Fatalf("removed top-level command remains in schema: %q", name)
 		}
 	}
 	if metadata, ok := commands["cache fields refresh"]; !ok || !metadata.auth || !metadata.mutating {

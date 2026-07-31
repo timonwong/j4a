@@ -103,7 +103,7 @@ func TestLoginInteractiveBasicAndJSON(t *testing.T) {
 	store := newMemorySecretStore()
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := &app{stdin: strings.NewReader(""), stdout: stdout, stderr: stderr, terminal: terminal, secretStore: store}
-	if code := a.execute([]string{"--config", path, "-ojson", "login"}); code != 0 {
+	if code := a.execute([]string{"--config", path, "-ojson", "auth", "login"}); code != 0 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	var envelope struct {
@@ -140,7 +140,7 @@ func TestLoginInteractivePATUsesExistingDefaultsAndFreshSecret(t *testing.T) {
 	store := newMemorySecretStore()
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := &app{stdin: strings.NewReader(""), stdout: stdout, stderr: stderr, terminal: terminal, secretStore: store}
-	if code := a.execute([]string{"--config", path, "--quiet", "login"}); code != 0 || stdout.Len() != 0 {
+	if code := a.execute([]string{"--config", path, "--quiet", "auth", "login"}); code != 0 || stdout.Len() != 0 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	if !storeContains(store, "fresh-token") || storeContains(store, "old-token") {
@@ -161,7 +161,7 @@ func TestLoginNewProfileRequiresExplicitAuthSelection(t *testing.T) {
 	}}
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := &app{stdin: strings.NewReader(""), stdout: stdout, stderr: stderr, terminal: terminal, secretStore: newMemorySecretStore()}
-	if code := a.execute([]string{"--config", path, "--profile", "new", "login"}); code != 2 || !strings.Contains(stderr.String(), "auth type") {
+	if code := a.execute([]string{"--config", path, "--profile", "new", "auth", "login"}); code != 2 || !strings.Contains(stderr.String(), "auth type") {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	after, err := os.ReadFile(path)
@@ -184,7 +184,7 @@ func TestLoginNonTTYEnvironmentAndStdin(t *testing.T) {
 		t.Setenv("JIRO_PASSWORD", "env-password")
 		path := filepath.Join(t.TempDir(), "config.toml")
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-		code := Execute([]string{"--config", path, "-ojson", "login", "--use-keyring=false"}, strings.NewReader("stdin-password"), stdout, stderr)
+		code := Execute([]string{"--config", path, "-ojson", "auth", "login", "--use-keyring=false"}, strings.NewReader("stdin-password"), stdout, stderr)
 		if code != 0 || stderr.Len() != 0 {
 			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
@@ -208,7 +208,7 @@ func TestLoginNonTTYEnvironmentAndStdin(t *testing.T) {
 		store := newMemorySecretStore()
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 		a := &app{stdin: strings.NewReader("stdin-token\n"), stdout: stdout, stderr: stderr, secretStore: store}
-		code := a.execute([]string{"--config", path, "--host", server.URL, "--auth-type", "pat", "login"})
+		code := a.execute([]string{"--config", path, "--host", server.URL, "--auth-type", "pat", "auth", "login"})
 		if code != 0 || stderr.Len() != 0 || !storeContains(store, "stdin-token") {
 			t.Fatalf("code=%d store=%+v stdout=%s stderr=%s", code, store, stdout.String(), stderr.String())
 		}
@@ -227,7 +227,7 @@ func TestLoginMissingInputAndUnauthorizedDoNotCommit(t *testing.T) {
 	t.Run("missing username", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "config.toml")
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-		code := Execute([]string{"--config", path, "--host", server.URL, "--auth-type", "basic", "login"}, strings.NewReader("secret"), stdout, stderr)
+		code := Execute([]string{"--config", path, "--host", server.URL, "--auth-type", "basic", "auth", "login"}, strings.NewReader("secret"), stdout, stderr)
 		if code != 2 || !strings.Contains(stderr.String(), "username is required") || calls != 0 {
 			t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls, stdout.String(), stderr.String())
 		}
@@ -236,7 +236,7 @@ func TestLoginMissingInputAndUnauthorizedDoNotCommit(t *testing.T) {
 	t.Run("new profile missing explicit auth", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "config.toml")
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-		code := Execute([]string{"--config", path, "--host", server.URL, "--username", "alice", "login"}, strings.NewReader("secret"), stdout, stderr)
+		code := Execute([]string{"--config", path, "--host", server.URL, "--username", "alice", "auth", "login"}, strings.NewReader("secret"), stdout, stderr)
 		if code != 2 || !strings.Contains(stderr.String(), "auth type must be basic or pat") || calls != 0 {
 			t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls, stdout.String(), stderr.String())
 		}
@@ -249,7 +249,7 @@ func TestLoginMissingInputAndUnauthorizedDoNotCommit(t *testing.T) {
 			t.Fatal(err)
 		}
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-		code := Execute([]string{"--config", path, "login"}, strings.NewReader("secret"), stdout, stderr)
+		code := Execute([]string{"--config", path, "auth", "login"}, strings.NewReader("secret"), stdout, stderr)
 		if code != 2 || !strings.Contains(stderr.String(), "REST API version 2") || calls != 0 {
 			t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls, stdout.String(), stderr.String())
 		}
@@ -271,7 +271,7 @@ func TestLoginMissingInputAndUnauthorizedDoNotCommit(t *testing.T) {
 		store := newMemorySecretStore()
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 		a := &app{stdin: strings.NewReader("bad-token"), stdout: stdout, stderr: stderr, secretStore: store}
-		code := a.execute([]string{"--config", path, "-ojson", "login"})
+		code := a.execute([]string{"--config", path, "-ojson", "auth", "login"})
 		if code != 3 || !strings.Contains(stderr.String(), `"kind":"auth"`) || store.setCalls != 0 {
 			t.Fatalf("code=%d store=%+v stdout=%s stderr=%s", code, store, stdout.String(), stderr.String())
 		}
@@ -288,7 +288,7 @@ func TestLoginMissingInputAndUnauthorizedDoNotCommit(t *testing.T) {
 func TestLoginLogoutRawAndLogoutIdempotence(t *testing.T) {
 	clearCommandEnv(t)
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	if code := Execute([]string{"--raw", "login"}, strings.NewReader(""), stdout, stderr); code != 2 || !strings.Contains(stderr.String(), "--raw is not available") {
+	if code := Execute([]string{"--raw", "auth", "login"}, strings.NewReader(""), stdout, stderr); code != 2 || !strings.Contains(stderr.String(), "--raw is not available") {
 		t.Fatalf("raw login code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 
@@ -299,7 +299,7 @@ func TestLoginLogoutRawAndLogoutIdempotence(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	a := &app{stdin: strings.NewReader("token"), stdout: stdout, stderr: stderr, secretStore: store}
-	if code := a.execute([]string{"--config", path, "--host", server.URL, "--auth-type", "pat", "login"}); code != 0 {
+	if code := a.execute([]string{"--config", path, "--host", server.URL, "--auth-type", "pat", "auth", "login"}); code != 0 {
 		t.Fatalf("login code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	t.Setenv("JIRO_TOKEN", "environment-token")
@@ -308,7 +308,7 @@ func TestLoginLogoutRawAndLogoutIdempotence(t *testing.T) {
 		stdout.Reset()
 		stderr.Reset()
 		a = &app{stdin: strings.NewReader(""), stdout: stdout, stderr: stderr, secretStore: store}
-		code := a.execute([]string{"--config", path, "-ojson", "logout"})
+		code := a.execute([]string{"--config", path, "-ojson", "auth", "logout"})
 		if code != 0 || stderr.Len() != 0 {
 			t.Fatalf("logout %d code=%d stdout=%s stderr=%s", index, code, stdout.String(), stderr.String())
 		}
@@ -325,7 +325,7 @@ func TestLoginLogoutRawAndLogoutIdempotence(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := Execute([]string{"--config", path, "--raw", "logout"}, strings.NewReader(""), stdout, stderr); code != 2 {
+	if code := Execute([]string{"--config", path, "--raw", "auth", "logout"}, strings.NewReader(""), stdout, stderr); code != 2 {
 		t.Fatalf("raw logout code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 }
@@ -335,8 +335,174 @@ func TestLogoutMissingProfileIsConfigError(t *testing.T) {
 	path := writeAuthConfig(t, "[default]\nhost = \"https://jira.example\"\nauth_type = \"pat\"\nuse_keyring = true\n")
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := &app{stdin: strings.NewReader(""), stdout: stdout, stderr: stderr, secretStore: newMemorySecretStore()}
-	if code := a.execute([]string{"--config", path, "--profile", "missing", "-ojson", "logout"}); code != 2 || !strings.Contains(stderr.String(), `"kind":"config"`) {
+	if code := a.execute([]string{"--config", path, "--profile", "missing", "-ojson", "auth", "logout"}); code != 2 || !strings.Contains(stderr.String(), `"kind":"config"`) {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestAuthStatusTextJSONQuietAndNamedProfile(t *testing.T) {
+	clearCommandEnv(t)
+	server := authenticatedServer(t, config.AuthBasic, "alice", "status-password", http.StatusOK)
+	defer server.Close()
+
+	path := writeAuthConfig(t, fmt.Sprintf(`[default]
+host = "https://default.example"
+username = "default-user"
+auth_type = "basic"
+use_keyring = false
+password = "default-password"
+
+[profiles.bot]
+host = %q
+username = "alice"
+auth_type = "basic"
+use_keyring = false
+password = "status-password"
+`, server.URL))
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	args := []string{"--config", path, "--profile", "bot", "auth", "status"}
+	if code := Execute(args, strings.NewReader(""), stdout, stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("text code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{"Profile", "bot", "Jira Instance", server.URL, "basic", "Test User (alice)", "true"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("text stdout=%q; missing %q", stdout.String(), want)
+		}
+	}
+	if strings.Contains(stdout.String(), "status-password") {
+		t.Fatalf("text status exposed credential: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	jsonArgs := []string{"--config", path, "--profile", "bot", "-ojson", "auth", "status"}
+	if code := Execute(jsonArgs, strings.NewReader(""), stdout, stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("json code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var envelope struct {
+		SchemaVersion string           `json:"schemaVersion"`
+		Data          authStatusResult `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.SchemaVersion != "1" || envelope.Data.Profile != "bot" || envelope.Data.Instance != server.URL || envelope.Data.AuthType != config.AuthBasic || envelope.Data.User.Username != "alice" || !envelope.Data.User.Active {
+		t.Fatalf("status = %+v", envelope)
+	}
+	if strings.Contains(stdout.String(), "status-password") {
+		t.Fatalf("json status exposed credential: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	quietArgs := []string{"--config", path, "--profile", "bot", "--quiet", "auth", "status"}
+	if code := Execute(quietArgs, strings.NewReader(""), stdout, stderr); code != 0 || stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("quiet code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("auth status modified the config")
+	}
+}
+
+func TestAuthStatusUsesInjectedKeyringStore(t *testing.T) {
+	clearCommandEnv(t)
+	server := authenticatedServer(t, config.AuthPAT, "", "keyring-token", http.StatusOK)
+	defer server.Close()
+	path := writeAuthConfig(t, fmt.Sprintf("[default]\nhost = %q\nauth_type = \"pat\"\nuse_keyring = true\n", server.URL))
+	store := newMemorySecretStore()
+	store.secrets[config.KeyringService+"/"+config.KeyringAccount("")] = "keyring-token"
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	a := &app{stdin: strings.NewReader(""), stdout: stdout, stderr: stderr, secretStore: store}
+	if code := a.execute([]string{"--config", path, "-ojson", "auth", "status"}); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"profile":"default"`) || strings.Contains(stdout.String(), "keyring-token") {
+		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+func TestAuthStatusFailuresAndRaw(t *testing.T) {
+	t.Run("missing credential", func(t *testing.T) {
+		clearCommandEnv(t)
+		path := writeAuthConfig(t, "[default]\nhost = \"https://jira.example\"\nauth_type = \"pat\"\nuse_keyring = false\n")
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		code := Execute([]string{"--config", path, "-ojson", "auth", "status"}, strings.NewReader(""), stdout, stderr)
+		if code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), `"kind":"config"`) {
+			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("invalid credential", func(t *testing.T) {
+		clearCommandEnv(t)
+		server := authenticatedServer(t, config.AuthPAT, "", "bad-token", http.StatusUnauthorized)
+		defer server.Close()
+		path := writeAuthConfig(t, fmt.Sprintf("[default]\nhost = %q\nauth_type = \"pat\"\nuse_keyring = false\ntoken = \"bad-token\"\n", server.URL))
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		code := Execute([]string{"--config", path, "-ojson", "auth", "status"}, strings.NewReader(""), stdout, stderr)
+		if code != 3 || stdout.Len() != 0 || !strings.Contains(stderr.String(), `"kind":"auth"`) {
+			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("network failure", func(t *testing.T) {
+		clearCommandEnv(t)
+		server := authenticatedServer(t, config.AuthPAT, "", "token", http.StatusOK)
+		instance := server.URL
+		server.Close()
+		path := writeAuthConfig(t, fmt.Sprintf("[default]\nhost = %q\nauth_type = \"pat\"\nuse_keyring = false\ntoken = \"token\"\n", instance))
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		code := Execute([]string{"--config", path, "-ojson", "auth", "status"}, strings.NewReader(""), stdout, stderr)
+		if code != 5 || stdout.Len() != 0 || !strings.Contains(stderr.String(), `"kind":"api_error"`) {
+			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("raw", func(t *testing.T) {
+		clearCommandEnv(t)
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		code := Execute([]string{"--raw", "auth", "status"}, strings.NewReader(""), stdout, stderr)
+		if code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "--raw is not available for auth status") {
+			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+	})
+}
+
+func TestAuthCommandsOnlyAvailableUnderAuth(t *testing.T) {
+	clearCommandEnv(t)
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	if code := Execute([]string{"--help"}, strings.NewReader(""), stdout, stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("root help code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "  auth ") || strings.Contains(stdout.String(), "\n  login ") || strings.Contains(stdout.String(), "\n  logout ") {
+		t.Fatalf("root help exposes wrong auth commands:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := Execute([]string{"auth", "--help"}, strings.NewReader(""), stdout, stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("auth help code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	for _, command := range []string{"login", "logout", "status"} {
+		if !strings.Contains(stdout.String(), "  "+command+" ") {
+			t.Fatalf("auth help missing %q:\n%s", command, stdout.String())
+		}
+	}
+
+	for _, command := range []string{"login", "logout"} {
+		stdout.Reset()
+		stderr.Reset()
+		if code := Execute([]string{command}, strings.NewReader(""), stdout, stderr); code != 1 || !strings.Contains(stderr.String(), "unknown command") {
+			t.Fatalf("top-level %s code=%d stdout=%s stderr=%s", command, code, stdout.String(), stderr.String())
+		}
 	}
 }
 
