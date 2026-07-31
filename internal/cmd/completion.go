@@ -31,6 +31,18 @@ func (a *app) configureCompletions(root *cobra.Command) {
 	mustRegisterFlagCompletion(issuesList, "assignee", fixedCompletions(
 		cobra.CompletionWithDesc("me", "Use Jira currentUser()"),
 	))
+	mustRegisterFlagCompletion(issuesList, "reporter", fixedCompletions(
+		cobra.CompletionWithDesc("me", "Use Jira currentUser()"),
+	))
+	mustRegisterFlagCompletion(issuesList, "resolution", fixedCompletions(
+		cobra.CompletionWithDesc("unresolved", "Issues without a resolution"),
+	))
+	mustRegisterFlagCompletion(issuesList, "sprint", fixedCompletions(
+		cobra.CompletionWithDesc("active", "Open sprints"),
+		cobra.CompletionWithDesc("open", "Open sprints"),
+		cobra.CompletionWithDesc("closed", "Closed sprints"),
+		cobra.CompletionWithDesc("future", "Future sprints"),
+	))
 
 	for _, path := range [][]string{{"issues", "create"}, {"issues", "update"}} {
 		command := mustFindCommand(root, path...)
@@ -40,6 +52,33 @@ func (a *app) configureCompletions(root *cobra.Command) {
 		))
 		mustRegisterFlagCompletion(command, "description-file", fileOrStdinCompletions)
 	}
+
+	issueCreate := mustFindCommand(root, "issues", "create")
+	mustRegisterFlagCompletion(issueCreate, "sprint", fixedCompletions(
+		cobra.CompletionWithDesc("active", "Open sprint"),
+	))
+	issueUpdate := mustFindCommand(root, "issues", "update")
+	for _, completion := range []struct {
+		field       string
+		description string
+	}{
+		{"component", "Clear all components"},
+		{"fix-version", "Clear all fix versions"},
+	} {
+		mustRegisterFlagCompletion(issueUpdate, completion.field, fixedCompletions(
+			cobra.CompletionWithDesc("none", completion.description),
+		))
+	}
+
+	assigneeCompletions := fixedCompletions(
+		cobra.CompletionWithDesc("me", "Assign to the current Jira user"),
+		cobra.CompletionWithDesc("none", "Clear the assignee"),
+	)
+	mustRegisterFlagCompletion(mustFindCommand(root, "issues", "assign"), "assignee", assigneeCompletions)
+	mustRegisterFlagCompletion(mustFindCommand(root, "issues", "bulk-assign"), "assignee", assigneeCompletions)
+	mustRegisterFlagCompletion(mustFindCommand(root, "issues", "move"), "sprint", fixedCompletions(
+		cobra.CompletionWithDesc("active", "Open sprint"),
+	))
 
 	issueComment := mustFindCommand(root, "issues", "comment")
 	mustRegisterFlagCompletion(issueComment, "input-format", inputFormatCompletions())

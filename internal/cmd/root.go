@@ -211,6 +211,20 @@ func (a *app) renderMessage(data any, message string) error {
 	return renderer.Success(data)
 }
 
+// renderPartial writes the complete result even when --quiet is set. Partial
+// outcomes are failures, and their stdout data is part of the public contract.
+func (a *app) renderPartial(data, text any) error {
+	renderer, err := a.renderer()
+	if err != nil {
+		return err
+	}
+	renderer.Quiet = false
+	if renderer.Format == output.FormatText {
+		return renderer.Success(text)
+	}
+	return renderer.Success(data)
+}
+
 func (a *app) rawRequest(ctx context.Context, client *jira.Client, method, path string, query url.Values, input any) error {
 	renderer, err := a.renderer()
 	if err != nil {

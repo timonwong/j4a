@@ -17,6 +17,12 @@ type User struct {
 	Active       bool   `json:"active"`
 }
 
+// AssigneeTarget is a resolved Jira REST v2 assignment target. A nil Username
+// deliberately clears the assignee.
+type AssigneeTarget struct {
+	Username *string `json:"username"`
+}
+
 // Project identifies a Jira project.
 type Project struct {
 	ID          string `json:"id"`
@@ -54,6 +60,81 @@ type Component struct {
 	Name string `json:"name"`
 }
 
+// Version identifies a Jira project version.
+type Version struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Archived bool   `json:"archived"`
+	Released bool   `json:"released"`
+}
+
+// IssueLinkType identifies the relationship and direction of an issue link.
+type IssueLinkType struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Inward  string `json:"inward"`
+	Outward string `json:"outward"`
+}
+
+// IssueLink is a normalized link relative to the issue it was listed from.
+type IssueLink struct {
+	ID           string        `json:"id"`
+	Direction    string        `json:"direction"`
+	Relationship string        `json:"relationship"`
+	Type         IssueLinkType `json:"type"`
+	OtherIssue   Issue         `json:"otherIssue"`
+}
+
+// IssueLinkInput creates a link from From to To using a resolved Link Type ID.
+// From is the outward issue and To is the inward issue in Jira's REST payload.
+type IssueLinkInput struct {
+	From   string `json:"from"`
+	To     string `json:"to"`
+	TypeID string `json:"typeId"`
+}
+
+// Board identifies a Jira Software board.
+type Board struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// BoardPage is a normalized page of Jira Software boards.
+type BoardPage struct {
+	StartAt    int     `json:"startAt"`
+	MaxResults int     `json:"maxResults"`
+	Total      int     `json:"total"`
+	IsLast     bool    `json:"isLast"`
+	Boards     []Board `json:"boards"`
+}
+
+// Sprint identifies a Jira Software sprint.
+type Sprint struct {
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	State        string `json:"state"`
+	BoardID      int    `json:"boardId,omitempty"`
+	Goal         string `json:"goal,omitempty"`
+	StartDate    string `json:"startDate,omitempty"`
+	EndDate      string `json:"endDate,omitempty"`
+	CompleteDate string `json:"completeDate,omitempty"`
+}
+
+// SprintPage is a normalized page of Jira Software sprints.
+type SprintPage struct {
+	StartAt    int      `json:"startAt"`
+	MaxResults int      `json:"maxResults"`
+	Total      int      `json:"total"`
+	IsLast     bool     `json:"isLast"`
+	Sprints    []Sprint `json:"sprints"`
+}
+
+// MoveIssueToSprintInput selects the target Sprint.
+type MoveIssueToSprintInput struct {
+	Sprint string `json:"sprint"`
+}
+
 // Issue is a normalized issue. Fields holds Jira field values keyed by their
 // Jira field IDs, without exposing the rest of Jira's wire document.
 type Issue struct {
@@ -67,8 +148,10 @@ type Issue struct {
 	Priority    *Priority      `json:"priority,omitempty"`
 	Assignee    *User          `json:"assignee,omitempty"`
 	Reporter    *User          `json:"reporter,omitempty"`
+	Parent      *Issue         `json:"parent,omitempty"`
 	Labels      []string       `json:"labels,omitempty"`
 	Components  []Component    `json:"components,omitempty"`
+	FixVersions []Version      `json:"fixVersions,omitempty"`
 	Created     string         `json:"created,omitempty"`
 	Updated     string         `json:"updated,omitempty"`
 	Fields      map[string]any `json:"fields,omitempty"`

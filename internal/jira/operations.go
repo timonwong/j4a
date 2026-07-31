@@ -2,6 +2,7 @@ package jira
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -97,6 +98,183 @@ func (c *Client) UpdateIssue(ctx context.Context, key string, input UpdateIssueI
 		return apperr.New(apperr.KindInvalidInput, "at least one issue field is required")
 	}
 	return c.do(ctx, http.MethodPut, "rest/api/2/issue/"+url.PathEscape(key), nil, map[string]any{"fields": fields}, nil)
+}
+
+// ResolveAssignee resolves a username, me, or none once for one operation.
+func (c *Client) ResolveAssignee(ctx context.Context, assignee string) (AssigneeTarget, error) {
+	assignee = strings.TrimSpace(assignee)
+	if assignee == "" {
+		return AssigneeTarget{}, apperr.New(apperr.KindInvalidInput, "assignee is required")
+	}
+	if strings.EqualFold(assignee, "me") {
+		user, err := c.Myself(ctx)
+		if err != nil {
+			return AssigneeTarget{}, err
+		}
+		if strings.TrimSpace(user.Username) == "" {
+			return AssigneeTarget{}, apperr.New(apperr.KindAPI, "authenticated Jira user has no username")
+		}
+		assignee = user.Username
+	} else if strings.EqualFold(assignee, "none") {
+		return AssigneeTarget{}, nil
+	}
+	return AssigneeTarget{Username: &assignee}, nil
+}
+
+// AssignIssue assigns or unassigns an issue using a resolved REST v2 target.
+func (c *Client) AssignIssue(ctx context.Context, key string, target AssigneeTarget) error {
+	if strings.TrimSpace(key) == "" {
+		return apperr.New(apperr.KindInvalidInput, "issue key is required")
+	}
+	var username any
+	if target.Username != nil {
+		username = *target.Username
+	}
+	return c.do(ctx, http.MethodPut, "rest/api/2/issue/"+url.PathEscape(key)+"/assignee", nil, map[string]any{"name": username}, nil)
+}
+
+// ListIssueLinks returns links relative to the supplied issue.
+func (c *Client) ListIssueLinks(ctx context.Context, key string) ([]IssueLink, error) {
+	if strings.TrimSpace(key) == "" {
+		return nil, apperr.New(apperr.KindInvalidInput, "issue key is required")
+	}
+	query := url.Values{"fields": {"issuelinks"}}
+	var wire wireIssue
+	if err := c.do(ctx, http.MethodGet, "rest/api/2/issue/"+url.PathEscape(key), query, nil, &wire); err != nil {
+		return nil, err
+	}
+	return normalizeIssueLinks(wire.Fields["issuelinks"]), nil
+}
+
+// ListIssueLinkTypes returns the link types configured on this Jira Instance.
+func (c *Client) ListIssueLinkTypes(ctx context.Context) ([]IssueLinkType, error) {
+	var wire struct {
+		IssueLinkTypes []wireIssueLinkType `json:"issueLinkTypes"`
+	}
+	if err := c.do(ctx, http.MethodGet, "rest/api/2/issueLinkType", nil, nil, &wire); err != nil {
+		return nil, err
+	}
+	result := make([]IssueLinkType, len(wire.IssueLinkTypes))
+	for i, linkType := range wire.IssueLinkTypes {
+		result[i] = normalizeIssueLinkType(linkType)
+	}
+	return result, nil
+}
+
+// CreateIssueLink creates an outward link from input.From to input.To.
+func (c *Client) CreateIssueLink(ctx context.Context, input IssueLinkInput) error {
+	if strings.TrimSpace(input.From) == "" || strings.TrimSpace(input.To) == "" || strings.TrimSpace(input.TypeID) == "" {
+		return apperr.New(apperr.KindInvalidInput, "from issue, to issue, and link type are required")
+	}
+	typeID := strings.TrimSpace(input.TypeID)
+	if id, err := strconv.ParseInt(typeID, 10, 64); err != nil || id <= 0 {
+		return apperr.New(apperr.KindInvalidInput, "link type ID must be positive")
+	}
+	payload := map[string]any{
+		"type":         map[string]string{"id": typeID},
+		"outwardIssue": map[string]string{"key": input.From},
+		"inwardIssue":  map[string]string{"key": input.To},
+	}
+	return c.do(ctx, http.MethodPost, "rest/api/2/issueLink", nil, payload, nil)
+}
+
+// DeleteIssueLink deletes one issue link by Jira link ID.
+func (c *Client) DeleteIssueLink(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if numericID, err := strconv.ParseInt(id, 10, 64); err != nil || numericID <= 0 {
+		return apperr.New(apperr.KindInvalidInput, "issue link ID is required")
+	}
+	return c.do(ctx, http.MethodDelete, "rest/api/2/issueLink/"+url.PathEscape(id), nil, nil, nil)
+}
+
+// ListBoards returns a page of Jira Software boards in Jira's source order.
+func (c *Client) ListBoards(ctx context.Context, page Page) (BoardPage, error) {
+	var wire wireBoardPage
+	if err := c.do(ctx, http.MethodGet, "rest/agile/1.0/board", pageQuery(page), nil, &wire); err != nil {
+		return BoardPage{}, err
+	}
+	return normalizeBoardPage(wire), nil
+}
+
+// ListSprints returns a page of a board's Jira Software sprints in Jira's
+// source order.
+func (c *Client) ListSprints(ctx context.Context, boardID int, page Page) (SprintPage, error) {
+	if boardID <= 0 {
+		return SprintPage{}, apperr.New(apperr.KindInvalidInput, "board ID is required")
+	}
+	var wire wireSprintPage
+	if err := c.do(ctx, http.MethodGet, "rest/agile/1.0/board/"+strconv.Itoa(boardID)+"/sprint", pageQuery(page), nil, &wire); err != nil {
+		return SprintPage{}, err
+	}
+	return normalizeSprintPage(wire), nil
+}
+
+// ResolveSprint resolves a numeric ID, active, or case-insensitive name
+// substring. Name and active matches preserve Jira's board and page order.
+func (c *Client) ResolveSprint(ctx context.Context, spec string) (Sprint, error) {
+	return c.resolveSprint(ctx, spec)
+}
+
+// MoveIssueToSprint moves an issue to the Sprint selected by input.
+func (c *Client) MoveIssueToSprint(ctx context.Context, key string, input MoveIssueToSprintInput) error {
+	if strings.TrimSpace(key) == "" || strings.TrimSpace(input.Sprint) == "" {
+		return apperr.New(apperr.KindInvalidInput, "issue key and sprint are required")
+	}
+	sprint, err := c.resolveSprint(ctx, input.Sprint)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodPost, "rest/agile/1.0/sprint/"+strconv.Itoa(sprint.ID)+"/issue", nil, map[string][]string{"issues": {key}}, nil)
+}
+
+func (c *Client) resolveSprint(ctx context.Context, spec string) (Sprint, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return Sprint{}, apperr.New(apperr.KindInvalidInput, "sprint is required")
+	}
+	if id, err := strconv.Atoi(spec); err == nil {
+		if id <= 0 {
+			return Sprint{}, apperr.New(apperr.KindInvalidInput, "sprint ID must be positive")
+		}
+		return Sprint{ID: id}, nil
+	}
+	active := strings.EqualFold(spec, "active")
+	needle := strings.ToLower(spec)
+	for boardPage := (Page{}); ; {
+		boards, err := c.ListBoards(ctx, boardPage)
+		if err != nil {
+			return Sprint{}, err
+		}
+		for _, board := range boards.Boards {
+			for sprintPage := (Page{}); ; {
+				sprints, err := c.ListSprints(ctx, board.ID, sprintPage)
+				if err != nil {
+					return Sprint{}, err
+				}
+				for _, sprint := range sprints.Sprints {
+					if (active && strings.EqualFold(sprint.State, "active")) || (!active && strings.Contains(strings.ToLower(sprint.Name), needle)) {
+						return sprint, nil
+					}
+				}
+				if !hasNextPage(sprints.StartAt, len(sprints.Sprints), sprints.Total, sprints.IsLast) {
+					break
+				}
+				sprintPage.StartAt = sprints.StartAt + len(sprints.Sprints)
+			}
+		}
+		if !hasNextPage(boards.StartAt, len(boards.Boards), boards.Total, boards.IsLast) {
+			break
+		}
+		boardPage.StartAt = boards.StartAt + len(boards.Boards)
+	}
+	return Sprint{}, apperr.New(apperr.KindInvalidInput, fmt.Sprintf("sprint %q was not found", spec))
+}
+
+func hasNextPage(startAt, count, total int, isLast bool) bool {
+	if isLast || count == 0 {
+		return false
+	}
+	return total == 0 || startAt+count < total
 }
 
 // ListComments returns comments on an issue.

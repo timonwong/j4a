@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/timonwong/j4a/internal/apperr"
 	"github.com/timonwong/j4a/internal/config"
@@ -16,6 +17,34 @@ import (
 )
 
 var directCustomFieldID = regexp.MustCompile(`^customfield_[0-9]+$`)
+var jqlRelativeDate = regexp.MustCompile(`^[+-][0-9]+[wdhm](?:\s+[0-9]+[wdhm])*$`)
+var jqlSprintID = regexp.MustCompile(`^[0-9]+$`)
+
+// IssueListJQLFilters contains the typed filters supported by issues list.
+// Values in Labels, Components, and FixVersions are combined with IN; every
+// populated field is combined with AND.
+type IssueListJQLFilters struct {
+	Project     string
+	Status      string
+	Assignee    string
+	IssueType   string
+	Resolution  string
+	Reporter    string
+	Labels      []string
+	Components  []string
+	FixVersions []string
+	Sprint      string
+	Parent      string
+	Created     string
+	Updated     string
+}
+
+// IssueListJQLOptions configures the Issue list JQL query. RawJQL is an
+// explicitly supplied JQL expression, which is combined with Filters.
+type IssueListJQLOptions struct {
+	RawJQL  string
+	Filters IssueListJQLFilters
+}
 
 func readText(reader io.Reader, inline string, inlineSet bool, file string) (*string, error) {
 	if inlineSet && file != "" {
@@ -106,52 +135,226 @@ func jqlLiteral(value string) string {
 	return `"` + value + `"`
 }
 
-func buildIssueJQL(raw, project, status, assignee, issueType string) string {
-	raw = strings.TrimSpace(raw)
-	order := ""
-	if index := strings.LastIndex(strings.ToLower(raw), " order by "); index >= 0 {
-		order = strings.TrimSpace(raw[index:])
-		raw = strings.TrimSpace(raw[:index])
-	} else if strings.HasPrefix(strings.ToLower(raw), "order by ") {
-		order = raw
-		raw = ""
+// BuildIssueJQL builds a Jira-native issue list query from typed filters.
+func BuildIssueJQL(options IssueListJQLOptions) (string, error) {
+	raw, order := splitJQLOrder(options.RawJQL)
+	filters := options.Filters
+	clauses := make([]string, 0, 15)
+	appendLiteral := func(field, value string) error {
+		value, err := validJQLFilterValue(field, value)
+		if err != nil {
+			return err
+		}
+		if value != "" {
+			clauses = append(clauses, field+" = "+jqlLiteral(value))
+		}
+		return nil
 	}
-	clauses := make([]string, 0, 5)
-	hasFilters := project != "" || status != "" || assignee != "" || issueType != ""
+	for _, filter := range []struct {
+		field string
+		value string
+	}{
+		{"project", filters.Project},
+		{"status", filters.Status},
+	} {
+		if err := appendLiteral(filter.field, filter.value); err != nil {
+			return "", err
+		}
+	}
+	if err := appendCurrentUserOrLiteral(&clauses, "assignee", filters.Assignee); err != nil {
+		return "", err
+	}
+	if err := appendLiteral("issuetype", filters.IssueType); err != nil {
+		return "", err
+	}
+	resolution, err := validJQLFilterValue("resolution", filters.Resolution)
+	if err != nil {
+		return "", err
+	}
+	if strings.EqualFold(resolution, "unresolved") {
+		clauses = append(clauses, "resolution IS EMPTY")
+	} else if resolution != "" {
+		clauses = append(clauses, "resolution = "+jqlLiteral(resolution))
+	}
+	if err := appendCurrentUserOrLiteral(&clauses, "reporter", filters.Reporter); err != nil {
+		return "", err
+	}
+	for _, filter := range []struct {
+		field  string
+		values []string
+	}{
+		{"labels", filters.Labels},
+		{"component", filters.Components},
+		{"fixVersion", filters.FixVersions},
+	} {
+		clause, err := jqlInClause(filter.field, filter.values)
+		if err != nil {
+			return "", err
+		}
+		if clause != "" {
+			clauses = append(clauses, clause)
+		}
+	}
+	if err := appendSprintClause(&clauses, filters.Sprint); err != nil {
+		return "", err
+	}
+	if err := appendLiteral("parent", filters.Parent); err != nil {
+		return "", err
+	}
+	for _, filter := range []struct {
+		field string
+		value string
+	}{
+		{"created", filters.Created},
+		{"updated", filters.Updated},
+	} {
+		dateClauses, err := jqlDateClauses(filter.field, filter.value)
+		if err != nil {
+			return "", err
+		}
+		clauses = append(clauses, dateClauses...)
+	}
 	if raw != "" {
-		if hasFilters {
-			clauses = append(clauses, "("+raw+")")
+		if len(clauses) > 0 {
+			clauses = append([]string{"(" + raw + ")"}, clauses...)
 		} else {
 			clauses = append(clauses, raw)
 		}
 	}
-	if project != "" {
-		clauses = append(clauses, "project = "+jqlLiteral(project))
-	}
-	if status != "" {
-		clauses = append(clauses, "status = "+jqlLiteral(status))
-	}
-	if assignee != "" {
-		if strings.EqualFold(assignee, "me") {
-			clauses = append(clauses, "assignee = currentUser()")
-		} else {
-			clauses = append(clauses, "assignee = "+jqlLiteral(assignee))
-		}
-	}
-	if issueType != "" {
-		clauses = append(clauses, "issuetype = "+jqlLiteral(issueType))
-	}
 	query := strings.Join(clauses, " AND ")
 	if order != "" {
 		if query == "" {
-			return order
+			return order, nil
 		}
-		return query + " " + order
+		return query + " " + order, nil
 	}
 	if query == "" {
+		return "ORDER BY updated DESC", nil
+	}
+	return query + " ORDER BY updated DESC", nil
+}
+
+func buildIssueJQL(raw, project, status, assignee, issueType string) string {
+	query, err := BuildIssueJQL(IssueListJQLOptions{
+		RawJQL: raw,
+		Filters: IssueListJQLFilters{
+			Project: project, Status: status, Assignee: assignee, IssueType: issueType,
+		},
+	})
+	if err != nil {
 		return "ORDER BY updated DESC"
 	}
-	return query + " ORDER BY updated DESC"
+	return query
+}
+
+func splitJQLOrder(raw string) (string, string) {
+	raw = strings.TrimSpace(raw)
+	if index := strings.LastIndex(strings.ToLower(raw), " order by "); index >= 0 {
+		return strings.TrimSpace(raw[:index]), strings.TrimSpace(raw[index:])
+	}
+	if strings.HasPrefix(strings.ToLower(raw), "order by ") {
+		return "", raw
+	}
+	return raw, ""
+}
+
+func validJQLFilterValue(field, value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil
+	}
+	if strings.ContainsAny(trimmed, "\x00\r\n") {
+		return "", fmt.Errorf("invalid %s filter value", field)
+	}
+	return trimmed, nil
+}
+
+func appendCurrentUserOrLiteral(clauses *[]string, field, value string) error {
+	value, err := validJQLFilterValue(field, value)
+	if err != nil || value == "" {
+		return err
+	}
+	if strings.EqualFold(value, "me") {
+		*clauses = append(*clauses, field+" = currentUser()")
+		return nil
+	}
+	*clauses = append(*clauses, field+" = "+jqlLiteral(value))
+	return nil
+}
+
+func jqlInClause(field string, values []string) (string, error) {
+	if len(values) == 0 {
+		return "", nil
+	}
+	literals := make([]string, 0, len(values))
+	for _, value := range values {
+		value, err := validJQLFilterValue(field, value)
+		if err != nil {
+			return "", err
+		}
+		if value == "" {
+			return "", fmt.Errorf("invalid %s filter value", field)
+		}
+		literals = append(literals, jqlLiteral(value))
+	}
+	return field + " IN (" + strings.Join(literals, ", ") + ")", nil
+}
+
+func appendSprintClause(clauses *[]string, sprint string) error {
+	sprint, err := validJQLFilterValue("sprint", sprint)
+	if err != nil || sprint == "" {
+		return err
+	}
+	switch strings.ToLower(sprint) {
+	case "active", "open":
+		*clauses = append(*clauses, "sprint IN openSprints()")
+	case "closed":
+		*clauses = append(*clauses, "sprint IN closedSprints()")
+	case "future":
+		*clauses = append(*clauses, "sprint IN futureSprints()")
+	default:
+		if jqlSprintID.MatchString(sprint) {
+			*clauses = append(*clauses, "sprint = "+sprint)
+			return nil
+		}
+		*clauses = append(*clauses, "sprint = "+jqlLiteral(sprint))
+	}
+	return nil
+}
+
+func jqlDateClauses(field, value string) ([]string, error) {
+	value, err := validJQLFilterValue(field, value)
+	if err != nil || value == "" {
+		return nil, err
+	}
+	for _, layout := range []string{"2006-01-02", "2006/01/02"} {
+		date, parseErr := time.Parse(layout, value)
+		if parseErr == nil {
+			return []string{
+				field + " >= " + jqlLiteral(date.Format("2006-01-02")),
+				field + " < " + jqlLiteral(date.AddDate(0, 0, 1).Format("2006-01-02")),
+			}, nil
+		}
+	}
+	if jqlRelativeDate.MatchString(value) {
+		return []string{field + " >= " + jqlLiteral(value)}, nil
+	}
+	if function, ok := allowedJQLDateFunctions[strings.ToLower(value)]; ok {
+		return []string{field + " >= " + function}, nil
+	}
+	return nil, fmt.Errorf("invalid %s date filter", field)
+}
+
+var allowedJQLDateFunctions = map[string]string{
+	"now()":          "now()",
+	"startofday()":   "startOfDay()",
+	"endofday()":     "endOfDay()",
+	"startofweek()":  "startOfWeek()",
+	"endofweek()":    "endOfWeek()",
+	"startofmonth()": "startOfMonth()",
+	"endofmonth()":   "endOfMonth()",
+	"startofyear()":  "startOfYear()",
+	"endofyear()":    "endOfYear()",
 }
 
 func searchAll(ctx context.Context, client *jira.Client, jql string, startAt, maxResults int, fields []string) (jira.SearchResult, error) {
@@ -160,6 +363,7 @@ func searchAll(ctx context.Context, client *jira.Client, jql string, startAt, ma
 	}
 	combined := jira.SearchResult{StartAt: startAt, MaxResults: maxResults}
 	next := startAt
+	seen := make(map[string]struct{})
 	for {
 		page, err := client.Search(ctx, jira.IssueListOptions{
 			JQL:    jql,
@@ -169,9 +373,33 @@ func searchAll(ctx context.Context, client *jira.Client, jql string, startAt, ma
 		if err != nil {
 			return jira.SearchResult{}, err
 		}
-		combined.Issues = append(combined.Issues, page.Issues...)
 		combined.Total = page.Total
-		if len(page.Issues) == 0 || next+len(page.Issues) >= page.Total {
+		if len(page.Issues) == 0 {
+			break
+		}
+		if page.StartAt != next {
+			return jira.SearchResult{}, apperr.New(apperr.KindAPI, fmt.Sprintf("Jira search pagination did not advance: requested startAt %d, received %d", next, page.StartAt))
+		}
+		added := 0
+		for _, issue := range page.Issues {
+			_, duplicateKey := seen["key:"+issue.Key]
+			_, duplicateID := seen["id:"+issue.ID]
+			if (issue.Key != "" && duplicateKey) || (issue.ID != "" && duplicateID) {
+				continue
+			}
+			if issue.Key != "" {
+				seen["key:"+issue.Key] = struct{}{}
+			}
+			if issue.ID != "" {
+				seen["id:"+issue.ID] = struct{}{}
+			}
+			combined.Issues = append(combined.Issues, issue)
+			added++
+		}
+		if added == 0 {
+			return jira.SearchResult{}, apperr.New(apperr.KindAPI, fmt.Sprintf("Jira search pagination returned no new issues at startAt %d", next))
+		}
+		if page.Total > 0 && next+len(page.Issues) >= page.Total {
 			break
 		}
 		next += len(page.Issues)

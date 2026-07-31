@@ -1,0 +1,549 @@
+package cmd
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestIssuesAssignResolvesMeAndSupportsNone(t *testing.T) {
+	clearCommandEnv(t)
+	tests := []struct {
+		name           string
+		value          string
+		wantUsername   any
+		wantMyselfCall bool
+	}{
+		{name: "me", value: "me", wantUsername: "alice", wantMyselfCall: true},
+		{name: "none", value: "none", wantUsername: nil},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			myselfCalls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				switch request.URL.Path {
+				case "/rest/api/2/myself":
+					myselfCalls++
+					_, _ = io.WriteString(writer, `{"name":"alice","displayName":"Alice","active":true}`)
+				case "/rest/api/2/issue/OPS-1/assignee":
+					if request.Method != http.MethodPut {
+						t.Fatalf("method = %s", request.Method)
+					}
+					var payload map[string]any
+					if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+						t.Fatal(err)
+					}
+					if got := payload["name"]; got != test.wantUsername {
+						t.Fatalf("username = %#v, want %#v", got, test.wantUsername)
+					}
+					writer.WriteHeader(http.StatusNoContent)
+				default:
+					t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+				}
+			}))
+			defer server.Close()
+
+			stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+			code := Execute([]string{
+				"--config", writeCLIConfig(t, server.URL, false), "-ojson",
+				"issues", "assign", "OPS-1", "--assignee", test.value,
+			}, strings.NewReader(""), stdout, stderr)
+			if code != 0 || stderr.Len() != 0 {
+				t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if (myselfCalls == 1) != test.wantMyselfCall {
+				t.Fatalf("myself calls = %d", myselfCalls)
+			}
+			var envelope struct {
+				Data struct {
+					Key      string `json:"key"`
+					Assignee any    `json:"assignee"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Data.Key != "OPS-1" {
+				t.Fatalf("result = %+v", envelope.Data)
+			}
+		})
+	}
+}
+
+func TestIssuesLinkResolvesTypeAndPreservesOutwardDirection(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/rest/api/2/issueLinkType":
+			_, _ = io.WriteString(writer, `{"issueLinkTypes":[{"id":"10000","name":"Depends","inward":"is depended on by","outward":"depends on"}]}`)
+		case "/rest/api/2/issueLink":
+			if request.Method != http.MethodPost {
+				t.Fatalf("method = %s", request.Method)
+			}
+			var payload struct {
+				Type         map[string]any `json:"type"`
+				OutwardIssue map[string]any `json:"outwardIssue"`
+				InwardIssue  map[string]any `json:"inwardIssue"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Type["id"] != "10000" || payload.OutwardIssue["key"] != "OPS-1" || payload.InwardIssue["key"] != "OPS-2" {
+				t.Fatalf("payload = %+v", payload)
+			}
+			writer.WriteHeader(http.StatusCreated)
+		default:
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson",
+		"issues", "link", "OPS-1", "--to", "OPS-2", "--type", "depends",
+	}, strings.NewReader(""), stdout, stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"from":"OPS-1"`) || !strings.Contains(stdout.String(), `"to":"OPS-2"`) {
+		t.Fatalf("stdout = %s", stdout.String())
+	}
+}
+
+func TestIssuesLinkRejectsNumericIDNameAmbiguity(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/rest/api/2/issueLinkType" {
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+		_, _ = io.WriteString(writer, `{"issueLinkTypes":[{"id":"10000","name":"Blocks","inward":"is blocked by","outward":"blocks"},{"id":"10001","name":"10000","inward":"inward","outward":"outward"}]}`)
+	}))
+	defer server.Close()
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "link", "OPS-1", "--to", "OPS-2", "--type", "10000",
+	}, strings.NewReader(""), stdout, stderr)
+	if code != 2 || !strings.Contains(stderr.String(), "ambiguous") {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestIssueLinkDiscoveryAndDeletion(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/rest/api/2/issue/OPS-1":
+			if request.URL.Query().Get("fields") != "issuelinks" {
+				t.Fatalf("query = %s", request.URL.RawQuery)
+			}
+			_, _ = io.WriteString(writer, `{"id":"1","key":"OPS-1","fields":{"issuelinks":[{"id":"55","type":{"id":"10000","name":"Depends","inward":"is depended on by","outward":"depends on"},"outwardIssue":{"id":"2","key":"OPS-2","fields":{"summary":"Target"}}}]}}`)
+		case "/rest/api/2/issueLinkType":
+			_, _ = io.WriteString(writer, `{"issueLinkTypes":[{"id":"10000","name":"Depends","inward":"is depended on by","outward":"depends on"}]}`)
+		case "/rest/api/2/issueLink/55":
+			if request.Method != http.MethodDelete {
+				t.Fatalf("method = %s", request.Method)
+			}
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	configPath := writeCLIConfig(t, server.URL, false)
+
+	t.Run("links expose the Jira link ID and direction", func(t *testing.T) {
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		code := Execute([]string{"--config", configPath, "-ojson", "issues", "links", "OPS-1"}, strings.NewReader(""), stdout, stderr)
+		if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"id":"55"`) || !strings.Contains(stdout.String(), `"direction":"outward"`) {
+			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("link types expose both relationships", func(t *testing.T) {
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		code := Execute([]string{"--config", configPath, "-ojson", "issues", "link-types"}, strings.NewReader(""), stdout, stderr)
+		if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"inward":"is depended on by"`) || !strings.Contains(stdout.String(), `"outward":"depends on"`) {
+			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("unlink deletes only by Jira link ID", func(t *testing.T) {
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		code := Execute([]string{"--config", configPath, "-ojson", "issues", "unlink", "55"}, strings.NewReader(""), stdout, stderr)
+		if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"linkId":"55"`) {
+			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+	})
+}
+
+func TestIssuesUnlinkRejectsIssueKeysBeforeNetwork(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("network must not be called for a non-numeric Jira link ID")
+	}))
+	defer server.Close()
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "unlink", "OPS-1",
+	}, strings.NewReader(""), stdout, stderr)
+	if code != 2 || !strings.Contains(stderr.String(), `"kind":"invalid_input"`) {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestIssueCreateAndUpdateStandardRelationshipFields(t *testing.T) {
+	clearCommandEnv(t)
+	requestNumber := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestNumber++
+		var payload struct {
+			Fields map[string]any `json:"fields"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		switch request.URL.Path {
+		case "/rest/api/2/issue":
+			parent := payload.Fields["parent"].(map[string]any)
+			components := payload.Fields["components"].([]any)
+			versions := payload.Fields["fixVersions"].([]any)
+			if parent["key"] != "OPS-1" || components[0].(map[string]any)["name"] != "API" || components[1].(map[string]any)["name"] != "UI" || versions[0].(map[string]any)["name"] != "4.4" {
+				t.Fatalf("create fields = %#v", payload.Fields)
+			}
+			_, _ = io.WriteString(writer, `{"id":"2","key":"OPS-2"}`)
+		case "/rest/api/2/issue/OPS-2":
+			if components, ok := payload.Fields["components"].([]any); !ok || len(components) != 0 {
+				t.Fatalf("components = %#v", payload.Fields["components"])
+			}
+			versions := payload.Fields["fixVersions"].([]any)
+			if len(versions) != 2 || versions[0].(map[string]any)["name"] != "4.5" || versions[1].(map[string]any)["name"] != "4.6" {
+				t.Fatalf("fixVersions = %#v", versions)
+			}
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	configPath := writeCLIConfig(t, server.URL, false)
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{
+		"--config", configPath, "issues", "create", "--project", "OPS", "--type", "Task", "--summary", "Child",
+		"--parent", "OPS-1", "--component", "API", "--component", "UI", "--fix-version", "4.4",
+	}, strings.NewReader(""), stdout, stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("create code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Execute([]string{
+		"--config", configPath, "issues", "update", "OPS-2", "--component", "none", "--fix-version", "4.5", "--fix-version", "4.6",
+	}, strings.NewReader(""), stdout, stderr)
+	if code != 0 || stderr.Len() != 0 || requestNumber != 2 {
+		t.Fatalf("update code=%d requests=%d stdout=%s stderr=%s", code, requestNumber, stdout.String(), stderr.String())
+	}
+}
+
+func TestIssueCreateWithSprintPreservesCreatedResultOnMoveFailure(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/rest/api/2/issue":
+			_, _ = io.WriteString(writer, `{"id":"9","key":"OPS-9"}`)
+		case "/rest/agile/1.0/board":
+			_, _ = io.WriteString(writer, `{"startAt":0,"maxResults":50,"total":0,"values":[]}`)
+		default:
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
+		"--project", "OPS", "--type", "Task", "--summary", "Scheduled", "--sprint", "missing",
+	}, strings.NewReader(""), stdout, stderr)
+	if code != 7 {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"id":"9"`) || !strings.Contains(stdout.String(), `"key":"OPS-9"`) {
+		t.Fatalf("created result was not preserved: %s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), `"kind":"partial_failure"`) || !strings.Contains(stderr.String(), `sprint \"missing\" was not found`) {
+		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
+func TestIssueCreateWithSprintAndMoveSucceed(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/rest/api/2/issue":
+			_, _ = io.WriteString(writer, `{"id":"10","key":"OPS-10"}`)
+		case "/rest/agile/1.0/sprint/42/issue":
+			var payload struct {
+				Issues []string `json:"issues"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if len(payload.Issues) != 1 || payload.Issues[0] != "OPS-10" {
+				t.Fatalf("payload = %+v", payload)
+			}
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
+		"--project", "OPS", "--type", "Task", "--summary", "Scheduled", "--sprint", "42",
+	}, strings.NewReader(""), stdout, stderr)
+	if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"sprintMoved":true`) {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestIssueCreateWithSprintMoveFailureNeverRollsBack(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/rest/api/2/issue":
+			if request.Method != http.MethodPost {
+				t.Fatalf("creation must not be rolled back: %s %s", request.Method, request.URL.Path)
+			}
+			_, _ = io.WriteString(writer, `{"id":"12","key":"OPS-12"}`)
+		case "/rest/agile/1.0/sprint/42/issue":
+			writer.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(writer, `{"errorMessages":["sprint is closed"]}`)
+		default:
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
+		"--project", "OPS", "--type", "Task", "--summary", "Scheduled", "--sprint", "42",
+	}, strings.NewReader(""), stdout, stderr)
+	if code != 7 || !strings.Contains(stdout.String(), `"key":"OPS-12"`) || !strings.Contains(stderr.String(), `"kind":"partial_failure"`) {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestPartialCreateResultIsWrittenInQuietTextMode(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/rest/api/2/issue":
+			_, _ = io.WriteString(writer, `{"id":"13","key":"OPS-13"}`)
+		case "/rest/agile/1.0/board":
+			_, _ = io.WriteString(writer, `{"startAt":0,"maxResults":50,"total":0,"values":[]}`)
+		default:
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{
+		"--config", writeCLIConfig(t, server.URL, false), "--quiet", "issues", "create",
+		"--project", "OPS", "--type", "Task", "--summary", "Scheduled", "--sprint", "missing",
+	}, strings.NewReader(""), stdout, stderr)
+	if code != 7 || stdout.String() != "Created OPS-13\n" || !strings.Contains(stderr.String(), "failed to move") {
+		t.Fatalf("code=%d stdout=%q stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestIssuesMoveUsesSprintSpec(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/rest/agile/1.0/sprint/42/issue" || request.Method != http.MethodPost {
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+		var payload struct {
+			Issues []string `json:"issues"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if len(payload.Issues) != 1 || payload.Issues[0] != "OPS-11" {
+			t.Fatalf("payload = %+v", payload)
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "move", "OPS-11", "--sprint", "42",
+	}, strings.NewReader(""), stdout, stderr)
+	if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"sprint":"42"`) {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestIssuesListWiresExtendedFilters(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/rest/api/2/search" || request.Method != http.MethodPost {
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		jql := payload["jql"].(string)
+		for _, fragment := range []string{
+			`resolution IS EMPTY`, `reporter = currentUser()`, `labels IN ("agent", "cli")`,
+			`component IN ("API")`, `fixVersion IN ("4.4")`, `sprint IN openSprints()`,
+			`parent = "OPS-1"`, `created >= "2026-07-31"`, `created < "2026-08-01"`, `updated >= "-7d"`,
+		} {
+			if !strings.Contains(jql, fragment) {
+				t.Fatalf("JQL %q does not contain %q", jql, fragment)
+			}
+		}
+		_, _ = io.WriteString(writer, `{"startAt":0,"maxResults":50,"total":1,"issues":[{"id":"2","key":"OPS-2","fields":{"summary":"Filtered","status":{"name":"Open"}}}]}`)
+	}))
+	defer server.Close()
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{
+		"--config", writeCLIConfig(t, server.URL, true), "issues", "list",
+		"--resolution", "unresolved", "--reporter", "me", "--label", "agent", "--label", "cli",
+		"--component", "API", "--fix-version", "4.4", "--sprint", "active", "--parent", "OPS-1",
+		"--created", "2026-07-31", "--updated=-7d",
+	}, strings.NewReader(""), stdout, stderr)
+	if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "OPS-2") {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestNewIssueCommandsRenderTextAndJSON(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/rest/api/2/search":
+			_, _ = io.WriteString(writer, `{"startAt":0,"maxResults":50,"total":0,"issues":[]}`)
+		case "/rest/api/2/issue":
+			_, _ = io.WriteString(writer, `{"id":"20","key":"OPS-20"}`)
+		case "/rest/api/2/issue/OPS-1":
+			if request.Method == http.MethodGet {
+				_, _ = io.WriteString(writer, `{"id":"1","key":"OPS-1","fields":{"issuelinks":[]}}`)
+			} else {
+				writer.WriteHeader(http.StatusNoContent)
+			}
+		case "/rest/api/2/issue/OPS-1/assignee", "/rest/agile/1.0/sprint/42/issue":
+			writer.WriteHeader(http.StatusNoContent)
+		case "/rest/api/2/issueLinkType":
+			_, _ = io.WriteString(writer, `{"issueLinkTypes":[{"id":"10000","name":"Blocks","inward":"is blocked by","outward":"blocks"}]}`)
+		case "/rest/api/2/issueLink":
+			writer.WriteHeader(http.StatusCreated)
+		case "/rest/api/2/issueLink/55":
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	configPath := writeCLIConfig(t, server.URL, false)
+	commands := []struct {
+		name string
+		args []string
+	}{
+		{"list filters", []string{"issues", "list", "--resolution", "unresolved", "--sprint", "active"}},
+		{"create fields and sprint", []string{"issues", "create", "--project", "OPS", "--type", "Task", "--summary", "Create", "--parent", "OPS-1", "--component", "API", "--fix-version", "4.4", "--sprint", "42"}},
+		{"update fields", []string{"issues", "update", "OPS-1", "--component", "none", "--fix-version", "4.5"}},
+		{"assign", []string{"issues", "assign", "OPS-1", "--assignee", "alice"}},
+		{"move", []string{"issues", "move", "OPS-1", "--sprint", "42"}},
+		{"links", []string{"issues", "links", "OPS-1"}},
+		{"link", []string{"issues", "link", "OPS-1", "--to", "OPS-2", "--type", "Blocks"}},
+		{"unlink", []string{"issues", "unlink", "55"}},
+		{"link types", []string{"issues", "link-types"}},
+		{"bulk transition", []string{"issues", "bulk-transition", "--jql", "project = EMPTY", "--to", "Done", "--dry-run"}},
+		{"bulk assign", []string{"issues", "bulk-assign", "--jql", "project = EMPTY", "--assignee", "alice", "--dry-run"}},
+	}
+	for _, command := range commands {
+		for _, format := range []string{"text", "json"} {
+			t.Run(command.name+"/"+format, func(t *testing.T) {
+				args := []string{"--config", configPath}
+				if format == "json" {
+					args = append(args, "-ojson")
+				}
+				args = append(args, command.args...)
+				stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+				code := Execute(args, strings.NewReader(""), stdout, stderr)
+				if code != 0 || stderr.Len() != 0 || stdout.Len() == 0 {
+					t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+				}
+				if format == "json" {
+					var envelope struct {
+						SchemaVersion string `json:"schemaVersion"`
+						Data          any    `json:"data"`
+					}
+					if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil || envelope.SchemaVersion != "1" || envelope.Data == nil {
+						t.Fatalf("JSON output = %s, err=%v", stdout.String(), err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestNewIssueCommandRequiredFlagsFailBeforeNetwork(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("missing required flags must fail before network access")
+	}))
+	defer server.Close()
+	configPath := writeCLIConfig(t, server.URL, false)
+	commands := [][]string{
+		{"issues", "assign", "OPS-1"},
+		{"issues", "move", "OPS-1"},
+		{"issues", "link", "OPS-1", "--to", "OPS-2"},
+		{"issues", "link", "OPS-1", "--type", "Blocks"},
+	}
+	for _, command := range commands {
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		args := append([]string{"--config", configPath, "-ojson"}, command...)
+		if code := Execute(args, strings.NewReader(""), stdout, stderr); code != 2 {
+			t.Fatalf("args=%v code=%d stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestNewIssueMutationsRespectReadOnlyBeforeCredentialResolution(t *testing.T) {
+	clearCommandEnv(t)
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[default]\nhost = \"https://jira.invalid\"\nusername = \"alice\"\nread_only = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commands := [][]string{
+		{"issues", "assign", "OPS-1", "--assignee", "alice"},
+		{"issues", "move", "OPS-1", "--sprint", "42"},
+		{"issues", "link", "OPS-1", "--to", "OPS-2", "--type", "10000"},
+		{"issues", "unlink", "55"},
+	}
+	for _, command := range commands {
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		args := append([]string{"--config", path, "-ojson"}, command...)
+		if code := Execute(args, strings.NewReader(""), stdout, stderr); code != 2 || !strings.Contains(stderr.String(), "read_only") {
+			t.Fatalf("args=%v code=%d stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
+		}
+	}
+}

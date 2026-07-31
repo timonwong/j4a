@@ -49,6 +49,48 @@ type wireComponent struct {
 	Name string `json:"name"`
 }
 
+type wireIssueLinkType struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Inward  string `json:"inward"`
+	Outward string `json:"outward"`
+}
+
+type wireBoard struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+type wireBoardPage struct {
+	StartAt    int         `json:"startAt"`
+	MaxResults int         `json:"maxResults"`
+	Total      int         `json:"total"`
+	IsLast     bool        `json:"isLast"`
+	IsLastPage bool        `json:"isLastPage"`
+	Values     []wireBoard `json:"values"`
+}
+
+type wireSprint struct {
+	ID            int    `json:"id"`
+	Name          string `json:"name"`
+	State         string `json:"state"`
+	OriginBoardID int    `json:"originBoardId"`
+	Goal          string `json:"goal"`
+	StartDate     string `json:"startDate"`
+	EndDate       string `json:"endDate"`
+	CompleteDate  string `json:"completeDate"`
+}
+
+type wireSprintPage struct {
+	StartAt    int          `json:"startAt"`
+	MaxResults int          `json:"maxResults"`
+	Total      int          `json:"total"`
+	IsLast     bool         `json:"isLast"`
+	IsLastPage bool         `json:"isLastPage"`
+	Values     []wireSprint `json:"values"`
+}
+
 type wireIssue struct {
 	ID     string         `json:"id"`
 	Key    string         `json:"key"`
@@ -134,11 +176,23 @@ func normalizeIssue(w wireIssue) Issue {
 	issue.Priority = priorityFromValue(w.Fields["priority"])
 	issue.Assignee = userFromValue(w.Fields["assignee"])
 	issue.Reporter = userFromValue(w.Fields["reporter"])
+	issue.Parent = issueFromValue(w.Fields["parent"])
 	if components, ok := w.Fields["components"].([]any); ok {
 		issue.Components = make([]Component, 0, len(components))
 		for _, component := range components {
 			if raw, ok := component.(map[string]any); ok {
 				issue.Components = append(issue.Components, Component{ID: stringValue(raw["id"]), Name: stringValue(raw["name"])})
+			}
+		}
+	}
+	if versions, ok := w.Fields["fixVersions"].([]any); ok {
+		issue.FixVersions = make([]Version, 0, len(versions))
+		for _, version := range versions {
+			if raw, ok := version.(map[string]any); ok {
+				issue.FixVersions = append(issue.FixVersions, Version{
+					ID: stringValue(raw["id"]), Name: stringValue(raw["name"]),
+					Archived: boolValue(raw["archived"]), Released: boolValue(raw["released"]),
+				})
 			}
 		}
 	}
@@ -179,6 +233,53 @@ func normalizeTransition(w wireTransition) Transition {
 	return transition
 }
 
+func normalizeIssueLinkType(w wireIssueLinkType) IssueLinkType {
+	return IssueLinkType{ID: w.ID, Name: w.Name, Inward: w.Inward, Outward: w.Outward}
+}
+
+func normalizeBoardPage(w wireBoardPage) BoardPage {
+	boards := make([]Board, len(w.Values))
+	for i, board := range w.Values {
+		boards[i] = Board{ID: board.ID, Name: board.Name, Type: board.Type}
+	}
+	return BoardPage{StartAt: w.StartAt, MaxResults: w.MaxResults, Total: w.Total, IsLast: w.IsLast || w.IsLastPage, Boards: boards}
+}
+
+func normalizeSprintPage(w wireSprintPage) SprintPage {
+	sprints := make([]Sprint, len(w.Values))
+	for i, sprint := range w.Values {
+		sprints[i] = Sprint{
+			ID: sprint.ID, Name: sprint.Name, State: sprint.State, BoardID: sprint.OriginBoardID,
+			Goal: sprint.Goal, StartDate: sprint.StartDate, EndDate: sprint.EndDate, CompleteDate: sprint.CompleteDate,
+		}
+	}
+	return SprintPage{StartAt: w.StartAt, MaxResults: w.MaxResults, Total: w.Total, IsLast: w.IsLast || w.IsLastPage, Sprints: sprints}
+}
+
+func normalizeIssueLinks(value any) []IssueLink {
+	rawLinks, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	links := make([]IssueLink, 0, len(rawLinks))
+	for _, value := range rawLinks {
+		raw, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		typeRaw, _ := raw["type"].(map[string]any)
+		linkType := IssueLinkType{ID: stringValue(typeRaw["id"]), Name: stringValue(typeRaw["name"]), Inward: stringValue(typeRaw["inward"]), Outward: stringValue(typeRaw["outward"])}
+		link := IssueLink{ID: stringValue(raw["id"]), Type: linkType}
+		if other := issueFromValue(raw["outwardIssue"]); other != nil {
+			link.Direction, link.Relationship, link.OtherIssue = "outward", linkType.Outward, *other
+		} else if other := issueFromValue(raw["inwardIssue"]); other != nil {
+			link.Direction, link.Relationship, link.OtherIssue = "inward", linkType.Inward, *other
+		}
+		links = append(links, link)
+	}
+	return links
+}
+
 func projectFromValue(value any) *Project {
 	raw, ok := value.(map[string]any)
 	if !ok {
@@ -212,6 +313,19 @@ func priorityFromValue(value any) *Priority {
 	return &Priority{ID: stringValue(raw["id"]), Name: stringValue(raw["name"])}
 }
 
+func issueFromValue(value any) *Issue {
+	raw, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	issue := &Issue{ID: stringValue(raw["id"]), Key: stringValue(raw["key"])}
+	if fields, ok := raw["fields"].(map[string]any); ok {
+		issue.Fields = cloneFields(fields)
+		issue.Summary = stringValue(fields["summary"])
+	}
+	return issue
+}
+
 func userFromValue(value any) *User {
 	raw, ok := value.(map[string]any)
 	if !ok {
@@ -230,6 +344,11 @@ func userFromValue(value any) *User {
 func stringValue(value any) string {
 	stringValue, _ := value.(string)
 	return stringValue
+}
+
+func boolValue(value any) bool {
+	result, _ := value.(bool)
+	return result
 }
 
 func decodeProjects(raw []byte) ([]Project, error) {

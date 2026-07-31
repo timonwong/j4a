@@ -221,28 +221,77 @@ func TestRawAndSchema(t *testing.T) {
 		SchemaVersion string `json:"schemaVersion"`
 		Data          struct {
 			ContractVersion string `json:"contractVersion"`
-			Commands        []struct {
-				Name     string `json:"name"`
-				Auth     bool   `json:"auth"`
-				Mutating bool   `json:"mutating"`
+			Output          struct {
+				SchemaVersion   string `json:"schemaVersion"`
+				PartialFailure  string `json:"partialFailure"`
+				RawRestrictions string `json:"rawRestrictions"`
+			} `json:"output"`
+			ExitCodes map[string]string `json:"exitCodes"`
+			Types     map[string]any    `json:"types"`
+			Commands  []struct {
+				Name     string         `json:"name"`
+				Auth     bool           `json:"auth"`
+				Mutating bool           `json:"mutating"`
+				JSONData map[string]any `json:"jsonData"`
+				Flags    []struct {
+					Name       string `json:"name"`
+					Repeatable bool   `json:"repeatable"`
+					Required   bool   `json:"required"`
+				} `json:"flags"`
 			} `json:"commands"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.SchemaVersion != "1" || envelope.Data.ContractVersion != "2" || len(envelope.Data.Commands) == 0 {
+	if envelope.SchemaVersion != "1" || envelope.Data.ContractVersion != "3" || len(envelope.Data.Commands) == 0 {
 		t.Fatalf("schema = %+v", envelope)
+	}
+	if envelope.Data.Output.SchemaVersion != "1" ||
+		!strings.Contains(envelope.Data.Output.PartialFailure, "stdout") ||
+		!strings.Contains(envelope.Data.Output.PartialFailure, "stderr") ||
+		!strings.Contains(envelope.Data.Output.RawRestrictions, "bulk-transition") ||
+		envelope.Data.ExitCodes["7"] != "partial failure" {
+		t.Fatalf("output contract = %+v exitCodes=%+v", envelope.Data.Output, envelope.Data.ExitCodes)
+	}
+	for _, name := range []string{"Version", "Sprint", "IssueLink", "IssueLinkType", "BatchResult", "BatchItem"} {
+		if envelope.Data.Types[name] == nil {
+			t.Fatalf("schema type %s is missing: %#v", name, envelope.Data.Types)
+		}
 	}
 	commands := make(map[string]struct {
 		auth, mutating bool
+	})
+	flags := make(map[string]map[string]struct {
+		repeatable bool
+		required   bool
 	})
 	for _, command := range envelope.Data.Commands {
 		commands[command.Name] = struct {
 			auth, mutating bool
 		}{command.Auth, command.Mutating}
+		flags[command.Name] = make(map[string]struct {
+			repeatable bool
+			required   bool
+		}, len(command.Flags))
+		for _, flag := range command.Flags {
+			flags[command.Name][flag.Name] = struct {
+				repeatable bool
+				required   bool
+			}{flag.Repeatable, flag.Required}
+		}
 		if strings.HasPrefix(command.Name, "config") {
 			t.Fatalf("removed config command remains in schema: %q", command.Name)
+		}
+		if strings.HasPrefix(command.Name, "issues bulk-") {
+			items, ok := command.JSONData["items"].([]any)
+			if !ok || len(items) != 1 {
+				t.Fatalf("%s items schema = %#v", command.Name, command.JSONData["items"])
+			}
+			item, ok := items[0].(map[string]any)
+			if !ok || item["current"] == nil || item["target"] == nil || item["outcome"] == nil {
+				t.Fatalf("%s item schema = %#v", command.Name, items[0])
+			}
 		}
 	}
 	for _, name := range []string{"login", "logout"} {
@@ -253,6 +302,40 @@ func TestRawAndSchema(t *testing.T) {
 	}
 	if metadata, ok := commands["cache fields refresh"]; !ok || !metadata.auth || !metadata.mutating {
 		t.Fatalf("cache fields refresh schema = %+v, present=%t", metadata, ok)
+	}
+	for _, command := range []struct {
+		name     string
+		mutating bool
+		flags    []string
+	}{
+		{"issues list", false, []string{"resolution", "reporter", "label", "component", "fix-version", "sprint", "parent", "created", "updated"}},
+		{"issues create", true, []string{"parent", "component", "fix-version", "sprint"}},
+		{"issues update", true, []string{"component", "fix-version"}},
+		{"issues move", true, []string{"sprint"}},
+		{"issues assign", true, []string{"assignee"}},
+		{"issues links", false, nil},
+		{"issues link", true, []string{"to", "type"}},
+		{"issues unlink", true, nil},
+		{"issues link-types", false, nil},
+		{"issues bulk-transition", true, []string{"jql", "to", "field", "dry-run", "yes"}},
+		{"issues bulk-assign", true, []string{"jql", "assignee", "dry-run", "yes"}},
+	} {
+		metadata, ok := commands[command.name]
+		if !ok || !metadata.auth || metadata.mutating != command.mutating {
+			t.Fatalf("%s schema = %+v, present=%t", command.name, metadata, ok)
+		}
+		for _, name := range command.flags {
+			if _, ok := flags[command.name][name]; !ok {
+				t.Fatalf("%s is missing --%s", command.name, name)
+			}
+		}
+	}
+	for _, command := range []string{"issues list", "issues create", "issues update"} {
+		for _, name := range []string{"label", "component", "fix-version"} {
+			if flag, ok := flags[command][name]; ok && !flag.repeatable {
+				t.Fatalf("%s --%s is not repeatable", command, name)
+			}
+		}
 	}
 }
 
