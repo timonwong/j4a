@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/timonwong/jiro/internal/apperr"
 	"github.com/timonwong/jiro/internal/jira"
-	"github.com/timonwong/jiro/internal/markup"
 	"github.com/timonwong/jiro/internal/output"
 )
 
@@ -167,9 +166,9 @@ func (a *app) issueCreateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if descriptionValue != nil {
-				converted := markup.ToJira(*descriptionValue, format)
-				descriptionValue = &converted
+			descriptionValue, err = convertToJiraMarkup(descriptionValue, format)
+			if err != nil {
+				return err
 			}
 			resolvedFields, err := a.resolveFields(command.Context(), client, settings, fields)
 			if err != nil {
@@ -246,9 +245,9 @@ func (a *app) issueUpdateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if descriptionValue != nil {
-				converted := markup.ToJira(*descriptionValue, format)
-				descriptionValue = &converted
+			descriptionValue, err = convertToJiraMarkup(descriptionValue, format)
+			if err != nil {
+				return err
 			}
 			resolvedFields, err := a.resolveFields(command.Context(), client, settings, fields)
 			if err != nil {
@@ -348,8 +347,11 @@ func (a *app) issueCommentCommand() *cobra.Command {
 			if bodyValue == nil || *bodyValue == "" {
 				return apperr.New(apperr.KindInvalidInput, "comment body is required")
 			}
-			converted := markup.ToJira(*bodyValue, format)
-			input := jira.CommentInput{Body: converted}
+			bodyValue, err = convertToJiraMarkup(bodyValue, format)
+			if err != nil {
+				return err
+			}
+			input := jira.CommentInput{Body: *bodyValue}
 			if isRaw(a) {
 				return a.rawRequest(command.Context(), client, http.MethodPost, issuePath(args[0])+"/comment", nil, input)
 			}

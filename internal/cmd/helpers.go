@@ -82,6 +82,17 @@ func parseInputFormat(value string) (markup.InputFormat, error) {
 	}
 }
 
+func convertToJiraMarkup(input *string, format markup.InputFormat) (*string, error) {
+	if input == nil {
+		return nil, nil
+	}
+	converted, err := markup.ToJira(*input, format)
+	if err != nil {
+		return nil, apperr.Wrap(apperr.KindInvalidInput, err, "convert Markdown Input: %v", err)
+	}
+	return &converted, nil
+}
+
 func (a *app) resolveFields(ctx context.Context, client *jira.Client, settings config.Settings, values []string) (map[string]any, error) {
 	parsed, err := jira.ParseFieldValues(values)
 	if err != nil {

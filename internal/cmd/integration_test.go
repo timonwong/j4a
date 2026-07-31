@@ -160,6 +160,67 @@ func TestCustomFieldAliasAndMarkdownCreate(t *testing.T) {
 	}
 }
 
+func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing.T) {
+	clearCommandEnv(t)
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		calls.Add(1)
+	}))
+	defer server.Close()
+	configPath := writeCLIConfig(t, server.URL, false)
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "issue create",
+			args: []string{
+				"issues", "create", "--project", "OPS", "--type", "Story", "--summary", "Unsupported input",
+				"--description", "> quote", "--input-format=markdown", "--field", "story-points=5",
+			},
+		},
+		{
+			name: "issue update",
+			args: []string{
+				"issues", "update", "OPS-1", "--description", "> quote", "--input-format=markdown",
+				"--field", "story-points=5",
+			},
+		},
+		{
+			name: "issue comment",
+			args: []string{"issues", "comment", "OPS-1", "--body", "> quote", "--input-format=markdown"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			calls.Store(0)
+			stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+			args := append([]string{"--config", configPath, "-ojson"}, test.args...)
+			code := Execute(args, strings.NewReader(""), stdout, stderr)
+			if code != 2 || stdout.Len() != 0 || calls.Load() != 0 {
+				t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls.Load(), stdout.String(), stderr.String())
+			}
+			var envelope struct {
+				SchemaVersion string `json:"schemaVersion"`
+				Error         struct {
+					Kind    string `json:"kind"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.SchemaVersion != "1" || envelope.Error.Kind != "invalid_input" ||
+				!strings.Contains(envelope.Error.Message, "line 1, column 1") ||
+				!strings.Contains(envelope.Error.Message, "Blockquote") ||
+				!strings.Contains(envelope.Error.Message, "unsupported Markdown Input syntax") {
+				t.Fatalf("error envelope = %+v", envelope)
+			}
+		})
+	}
+}
+
 func TestReadOnlyBlocksMutationAndInputConflict(t *testing.T) {
 	clearCommandEnv(t)
 	var calls atomic.Int32
