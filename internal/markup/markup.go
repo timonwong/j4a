@@ -4,6 +4,7 @@ package markup
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	extensionast "github.com/yuin/goldmark/extension/ast"
+	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
 )
@@ -53,8 +55,13 @@ func ToJira(input string, format InputFormat) (string, error) {
 	}
 
 	source := []byte(input)
-	parser := goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough))
-	document := parser.Parser().Parse(text.NewReader(source))
+	markdownParser := goldmark.New(
+		goldmark.WithExtensions(extension.Table, extension.Strikethrough),
+		goldmark.WithParserOptions(parser.WithBlockParsers(
+			util.Prioritized(jiraListParser{BlockParser: parser.NewListParser()}, 299),
+		)),
+	)
+	document := markdownParser.Parser().Parse(text.NewReader(source))
 	result, err := jiraMarkupRenderer{source: source}.renderDocument(document)
 	if err != nil {
 		return "", err
@@ -64,6 +71,64 @@ func ToJira(input string, format InputFormat) (string, error) {
 
 type jiraMarkupRenderer struct {
 	source []byte
+}
+
+// jiraListParser preserves Goldmark's list behavior except that Jira's
+// Markdown Input dialect lets any non-empty ordered list interrupt a paragraph.
+type jiraListParser struct {
+	parser.BlockParser
+}
+
+func (p jiraListParser) Open(parent ast.Node, reader text.Reader, context parser.Context) (ast.Node, parser.State) {
+	if _, isList := parent.(*ast.List); isList {
+		return nil, parser.NoChildren
+	}
+	last := context.LastOpenedBlock().Node
+	if !ast.IsParagraph(last) || last.Parent() != parent {
+		return nil, parser.NoChildren
+	}
+	line, _ := reader.PeekLine()
+	marker, start, ok := orderedListInterrupt(line)
+	if !ok || start == 1 {
+		return nil, parser.NoChildren
+	}
+	list := ast.NewList(marker)
+	list.Start = start
+	return list, parser.HasChildren
+}
+
+func orderedListInterrupt(line []byte) (byte, int, bool) {
+	index := 0
+	for index < len(line) && line[index] == ' ' {
+		index++
+	}
+	if index > 3 {
+		return 0, 0, false
+	}
+	startIndex := index
+	for index < len(line) && line[index] >= '0' && line[index] <= '9' {
+		index++
+	}
+	if digitCount := index - startIndex; digitCount == 0 || digitCount > 9 || index >= len(line) {
+		return 0, 0, false
+	}
+	marker := line[index]
+	if marker != '.' && marker != ')' {
+		return 0, 0, false
+	}
+	start, err := strconv.Atoi(string(line[startIndex:index]))
+	if err != nil {
+		return 0, 0, false
+	}
+	index++
+	if index >= len(line) || util.IsBlank(line[index:]) {
+		return 0, 0, false
+	}
+	indentWidth, _ := util.IndentWidth(line[index:], index)
+	if indentWidth == 0 {
+		return 0, 0, false
+	}
+	return marker, start, true
 }
 
 const (

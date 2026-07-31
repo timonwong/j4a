@@ -172,6 +172,23 @@ func TestToJiraNormalizesOrderedListStartValue(t *testing.T) {
 	}
 }
 
+func TestToJiraOrderedListAboveOneInterruptsParagraphs(t *testing.T) {
+	t.Parallel()
+	tests := []markdownConversionCase{
+		{
+			name:  "top-level paragraph",
+			input: "Intro\n3. three\n4. four",
+			want:  "Intro\n\n# three\n# four",
+		},
+		{
+			name:  "nested item text",
+			input: "- parent\n  3. child\n  4. next",
+			want:  "* parent\n*# child\n*# next",
+		},
+	}
+	assertMarkdownConversions(t, tests)
+}
+
 func TestToJiraPreservesFormattedBlockquoteParagraphs(t *testing.T) {
 	t.Parallel()
 	input := "> **alpha**\n>\n> beta _two_"
