@@ -315,6 +315,9 @@ jiro issues create \
   --input-format=markdown
 ```
 
+The accepted Markdown Input dialect and exact conversion behavior are documented
+in [`docs/markdown-input.md`](docs/markdown-input.md).
+
 Long text accepts inline input, a file path, or `-` for stdin. Inline and file
 forms are mutually exclusive.
 
