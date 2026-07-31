@@ -66,7 +66,7 @@ func (a *app) schemaCommand() *cobra.Command {
 
 func schemaDocument() cliSchema {
 	return cliSchema{
-		ContractVersion: "3",
+		ContractVersion: "4",
 		Program:         "jiro",
 		Platform:        "Jira Data Center/Server REST API v2",
 		GlobalFlags: []flagSchema{
@@ -77,8 +77,9 @@ func schemaDocument() cliSchema {
 		},
 		Commands: []commandSchema{
 			commandWithFlags("cache fields refresh", []string{"cache field refresh"}, true, "", nil, object("refreshed", "path", "fieldCount", "fetchedAt", "expiresAt", "instance", "principal")),
-			{Name: "login", Auth: false, Mutating: true, Flags: []flagSchema{flagDefault("use-keyring", "", "boolean", true)}, JSONData: object("profile", "host", "authType", "credentialStore", "user")},
-			{Name: "logout", Auth: false, Mutating: true, JSONData: object("profile", "credentialStore", "credentialRemoved", "environmentCredentialActive")},
+			{Name: "auth login", Auth: false, Mutating: true, Flags: []flagSchema{flagDefault("use-keyring", "", "boolean", true)}, JSONData: object("profile", "host", "authType", "credentialStore", "user")},
+			{Name: "auth logout", Auth: false, Mutating: true, JSONData: object("profile", "credentialStore", "credentialRemoved", "environmentCredentialActive")},
+			{Name: "auth status", Auth: true, Mutating: false, JSONData: object("profile", "instance", "authType", "user")},
 			command("myself", false, "", object("accountId", "username", "displayName", "emailAddress", "active")),
 			commandWithFlags("issues list", []string{"issue list"}, false, "", []flagSchema{
 				flag("project", "p", "string"), flag("status", "", "string"), flag("assignee", "", "string"),
@@ -143,7 +144,7 @@ func schemaDocument() cliSchema {
 			Default: "text", JSONEnvelope: `{"schemaVersion":"1","data":...,"warnings":[...]?}`,
 			ErrorEnvelope: `{"schemaVersion":"1","error":{"kind":...,"message":...}}`,
 			SuccessStream: "stdout", ErrorStream: "stderr", Raw: "unmodified Jira REST response",
-			RawRestrictions: "--raw is unavailable for issues create --sprint, issues bulk-transition, and issues bulk-assign; supported single-request issue actions keep their raw REST response behavior",
+			RawRestrictions: "--raw is unavailable for auth login, auth logout, auth status, issues create --sprint, issues bulk-transition, and issues bulk-assign; supported single-request issue actions keep their raw REST response behavior",
 			PartialFailure:  "on partial_failure, complete normalized result data is written to stdout before the structured error is written to stderr; exit code 7",
 			SchemaVersion:   output.SchemaVersion, Warnings: "non-fatal success conditions; JSON envelope or text stderr",
 		},

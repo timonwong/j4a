@@ -84,7 +84,24 @@ type logoutResult struct {
 	EnvironmentCredentialActive bool   `json:"environmentCredentialActive"`
 }
 
-func (a *app) loginCommand() *cobra.Command {
+type authStatusResult struct {
+	Profile  string          `json:"profile"`
+	Instance string          `json:"instance"`
+	AuthType config.AuthType `json:"authType"`
+	User     jira.User       `json:"user"`
+}
+
+func (a *app) authCommand() *cobra.Command {
+	command := &cobra.Command{Use: "auth", Short: "Manage Jira authentication"}
+	command.AddCommand(
+		a.authLoginCommand(),
+		a.authLogoutCommand(),
+		a.authStatusCommand(),
+	)
+	return command
+}
+
+func (a *app) authLoginCommand() *cobra.Command {
 	useKeyring := true
 	command := &cobra.Command{
 		Use:   "login",
@@ -92,7 +109,7 @@ func (a *app) loginCommand() *cobra.Command {
 		Args:  exactArgs(0),
 		RunE: func(command *cobra.Command, _ []string) error {
 			if a.raw {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for login")
+				return apperr.New(apperr.KindInvalidInput, "--raw is not available for auth login")
 			}
 			draft, err := config.LoadDraft(a.configOptions())
 			if err != nil {
@@ -128,14 +145,14 @@ func (a *app) loginCommand() *cobra.Command {
 	return command
 }
 
-func (a *app) logoutCommand() *cobra.Command {
+func (a *app) authLogoutCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
 		Short: "Remove a Jira Profile credential",
 		Args:  exactArgs(0),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if a.raw {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for logout")
+				return apperr.New(apperr.KindInvalidInput, "--raw is not available for auth logout")
 			}
 			removed, err := config.Logout(a.configOptions(), a.secretStore)
 			if err != nil {
@@ -156,6 +173,39 @@ func (a *app) logoutCommand() *cobra.Command {
 					{"Profile", result.Profile}, {"Credential Store", result.CredentialStore},
 					{"Credential Removed", fmt.Sprint(result.CredentialRemoved)},
 					{"Environment Credential Active", fmt.Sprint(result.EnvironmentCredentialActive)},
+				},
+			})
+		},
+	}
+}
+
+func (a *app) authStatusCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Verify the current Jira authentication",
+		Args:  exactArgs(0),
+		RunE: func(command *cobra.Command, _ []string) error {
+			if a.raw {
+				return apperr.New(apperr.KindInvalidInput, "--raw is not available for auth status")
+			}
+			client, settings, err := a.client()
+			if err != nil {
+				return err
+			}
+			user, err := client.Myself(command.Context())
+			if err != nil {
+				return err
+			}
+			result := authStatusResult{
+				Profile: profileName(settings.Profile), Instance: settings.Host,
+				AuthType: settings.AuthType, User: user,
+			}
+			return a.render(result, output.Table{
+				Headers: []string{"FIELD", "VALUE"},
+				Rows: [][]string{
+					{"Profile", result.Profile}, {"Jira Instance", result.Instance},
+					{"Auth Type", string(result.AuthType)}, {"User", displayUser(result.User)},
+					{"Active", stringValue(result.User.Active)},
 				},
 			})
 		},

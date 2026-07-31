@@ -55,6 +55,7 @@ host = "https://alpha.example"
 		{"output", []string{"__complete", "--output", ""}, []string{"text\tHuman-readable output", "json\tVersioned machine-readable output", ":4"}},
 		{"auth type", []string{"__complete", "--auth-type", ""}, []string{"basic\tUsername and password authentication", "pat\tPersonal Access Token authentication", ":4"}},
 		{"profiles", []string{"__complete", "--config", path, "--profile", ""}, []string{"alpha", "zeta", ":4"}},
+		{"auth commands", []string{"__complete", "auth", ""}, []string{"login\tAuthenticate and save a Jira Profile", "logout\tRemove a Jira Profile credential", "status\tVerify the current Jira authentication", ":4"}},
 		{"input format", []string{"__complete", "issues", "create", "--input-format", ""}, []string{"jira\tJira wiki markup", "markdown\tConvert Markdown to Jira markup", ":4"}},
 		{"assignee", []string{"__complete", "issues", "list", "--assignee", ""}, []string{"me\tUse Jira currentUser()", ":4"}},
 		{"issue list fixed filters", []string{"__complete", "issues", "list", "--sprint", ""}, []string{"active\tOpen sprints", "open\tOpen sprints", "closed\tClosed sprints", "future\tFuture sprints", ":4"}},
