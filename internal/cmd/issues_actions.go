@@ -64,7 +64,11 @@ func (a *app) issueLinksCommand() *cobra.Command {
 				rows = append(rows, []string{link.ID, link.Direction, link.Relationship, link.Type.Name, link.OtherIssue.Key})
 			}
 			return a.render(map[string]any{"issueKey": args[0], "links": links}, output.Table{
-				Headers: []string{"ID", "DIRECTION", "RELATIONSHIP", "TYPE", "ISSUE"}, Rows: rows,
+				Columns: []output.Column{
+					output.Fixed("ID"), output.Flexible("DIRECTION"), output.Flexible("RELATIONSHIP"),
+					output.Flexible("TYPE"), output.Fixed("ISSUE"),
+				},
+				Rows: rows,
 			})
 		},
 	}
@@ -166,7 +170,8 @@ func (a *app) issueLinkTypesCommand() *cobra.Command {
 				rows = append(rows, []string{linkType.ID, linkType.Name, linkType.Inward, linkType.Outward})
 			}
 			return a.render(map[string]any{"linkTypes": types}, output.Table{
-				Headers: []string{"ID", "NAME", "INWARD", "OUTWARD"}, Rows: rows,
+				Columns: []output.Column{output.Fixed("ID"), output.Flexible("NAME"), output.Flexible("INWARD"), output.Flexible("OUTWARD")},
+				Rows:    rows,
 			})
 		},
 	}

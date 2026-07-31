@@ -34,7 +34,7 @@ func (a *app) searchCommand() *cobra.Command {
 				return err
 			}
 			return a.render(result, output.Table{
-				Headers: []string{"KEY", "SUMMARY", "STATUS", "ASSIGNEE"},
+				Columns: []output.Column{output.Fixed("KEY"), output.Flexible("SUMMARY"), output.Flexible("STATUS"), output.Flexible("ASSIGNEE")},
 				Rows:    issueRows(result.Issues),
 			})
 		},
@@ -75,7 +75,7 @@ func (a *app) projectsListCommand() *cobra.Command {
 				rows = append(rows, []string{project.Key, project.Name, project.ProjectType})
 			}
 			return a.render(map[string]any{"projects": projects}, output.Table{
-				Headers: []string{"KEY", "NAME", "TYPE"}, Rows: rows,
+				Columns: []output.Column{output.Fixed("KEY"), output.Flexible("NAME"), output.Flexible("TYPE")}, Rows: rows,
 			})
 		},
 	}
@@ -103,7 +103,7 @@ func (a *app) projectShowCommand() *cobra.Command {
 				lead = project.Lead.DisplayName
 			}
 			return a.render(project, output.Table{
-				Headers: []string{"FIELD", "VALUE"},
+				Columns: []output.Column{output.Fixed("FIELD"), output.Flexible("VALUE")},
 				Rows: [][]string{
 					{"Key", project.Key}, {"Name", project.Name}, {"Type", project.ProjectType},
 					{"Lead", lead}, {"Description", project.Description},
@@ -161,7 +161,7 @@ func (a *app) fieldsListCommand() *cobra.Command {
 				rows = append(rows, []string{field.ID, field.Name, alias, field.Type})
 			}
 			return a.render(map[string]any{"fields": views}, output.Table{
-				Headers: []string{"ID", "NAME", "ALIAS", "TYPE"}, Rows: rows,
+				Columns: []output.Column{output.Fixed("ID"), output.Flexible("NAME"), output.Fixed("ALIAS"), output.Flexible("TYPE")}, Rows: rows,
 			})
 		},
 	}

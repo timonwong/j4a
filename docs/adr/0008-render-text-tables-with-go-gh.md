@@ -1,0 +1,3 @@
+# Render text tables with go-gh
+
+jiro renders every tabular text result through `github.com/cli/go-gh/v2/pkg/tableprinter`: an actual or explicitly forced TTY receives a viewport-aware table, while non-TTY output is headerless, untruncated TSV and an empty result writes zero bytes. Commands define opaque `Fixed` columns for complete copyable identifiers and `Flexible` columns for truncatable Jira text; headers and cells are sanitized into safe single-line presentation without changing normalized JSON. jiro owns terminal discovery with `golang.org/x/term`, accepts only strict boolean values for `JIRO_FORCE_TTY`, falls back to 80 columns when a forced terminal width is unavailable, and keeps colors outside this decision.

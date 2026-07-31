@@ -527,20 +527,21 @@ func TestNewIssueCommandsRenderTextAndJSON(t *testing.T) {
 	defer server.Close()
 	configPath := writeCLIConfig(t, server.URL, false)
 	commands := []struct {
-		name string
-		args []string
+		name      string
+		args      []string
+		emptyText bool
 	}{
-		{"list filters", []string{"issue", "list", "--resolution", "unresolved", "--sprint", "active"}},
-		{"create fields and sprint", []string{"issue", "add", "--project", "OPS", "--type", "Task", "--summary", "Create", "--parent", "OPS-1", "--component", "API", "--fix-version", "4.4", "--sprint", "42"}},
-		{"update fields", []string{"issue", "update", "OPS-1", "--component", "none", "--fix-version", "4.5"}},
-		{"assign", []string{"issue", "assign", "OPS-1", "--assignee", "alice"}},
-		{"move", []string{"issue", "update", "OPS-1", "--sprint", "42"}},
-		{"links", []string{"issue", "link", "list", "OPS-1"}},
-		{"link", []string{"issue", "link", "add", "OPS-1", "--to", "OPS-2", "--type", "Blocks"}},
-		{"unlink", []string{"issue", "link", "delete", "55"}},
-		{"link types", []string{"issue", "link", "types"}},
-		{"bulk transition", []string{"issue", "bulk", "move", "--jql", "project = EMPTY", "--to", "Done", "--dry-run"}},
-		{"bulk assign", []string{"issue", "bulk", "assign", "--jql", "project = EMPTY", "--assignee", "alice", "--dry-run"}},
+		{name: "list filters", args: []string{"issue", "list", "--resolution", "unresolved", "--sprint", "active"}, emptyText: true},
+		{name: "create fields and sprint", args: []string{"issue", "add", "--project", "OPS", "--type", "Task", "--summary", "Create", "--parent", "OPS-1", "--component", "API", "--fix-version", "4.4", "--sprint", "42"}},
+		{name: "update fields", args: []string{"issue", "update", "OPS-1", "--component", "none", "--fix-version", "4.5"}},
+		{name: "assign", args: []string{"issue", "assign", "OPS-1", "--assignee", "alice"}},
+		{name: "move", args: []string{"issue", "update", "OPS-1", "--sprint", "42"}},
+		{name: "links", args: []string{"issue", "link", "list", "OPS-1"}, emptyText: true},
+		{name: "link", args: []string{"issue", "link", "add", "OPS-1", "--to", "OPS-2", "--type", "Blocks"}},
+		{name: "unlink", args: []string{"issue", "link", "delete", "55"}},
+		{name: "link types", args: []string{"issue", "link", "types"}},
+		{name: "bulk transition", args: []string{"issue", "bulk", "move", "--jql", "project = EMPTY", "--to", "Done", "--dry-run"}, emptyText: true},
+		{name: "bulk assign", args: []string{"issue", "bulk", "assign", "--jql", "project = EMPTY", "--assignee", "alice", "--dry-run"}, emptyText: true},
 	}
 	for _, command := range commands {
 		for _, format := range []string{"text", "json"} {
@@ -552,10 +553,13 @@ func TestNewIssueCommandsRenderTextAndJSON(t *testing.T) {
 				args = append(args, command.args...)
 				stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 				code := Execute(args, strings.NewReader(""), stdout, stderr)
-				if code != 0 || stderr.Len() != 0 || stdout.Len() == 0 {
+				if code != 0 || stderr.Len() != 0 {
 					t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 				}
 				if format == "json" {
+					if stdout.Len() == 0 {
+						t.Fatal("JSON output is empty")
+					}
 					var envelope struct {
 						SchemaVersion string `json:"schemaVersion"`
 						Data          any    `json:"data"`
@@ -563,6 +567,12 @@ func TestNewIssueCommandsRenderTextAndJSON(t *testing.T) {
 					if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil || envelope.SchemaVersion != "1" || envelope.Data == nil {
 						t.Fatalf("JSON output = %s, err=%v", stdout.String(), err)
 					}
+				} else if command.emptyText {
+					if stdout.Len() != 0 {
+						t.Fatalf("text output = %q, want empty", stdout.String())
+					}
+				} else if stdout.Len() == 0 {
+					t.Fatal("text output is empty")
 				}
 			})
 		}

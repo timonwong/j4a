@@ -129,7 +129,7 @@ func (a *app) authLoginCommand() *cobra.Command {
 				AuthType: candidate.AuthType, CredentialStore: store, User: user,
 			}
 			return a.render(result, output.Table{
-				Headers: []string{"FIELD", "VALUE"},
+				Columns: []output.Column{output.Fixed("FIELD"), output.Flexible("VALUE")},
 				Rows: [][]string{
 					{"Profile", result.Profile}, {"Host", result.Host},
 					{"Auth Type", string(result.AuthType)}, {"Credential Store", result.CredentialStore},
@@ -162,7 +162,7 @@ func (a *app) authLogoutCommand() *cobra.Command {
 				EnvironmentCredentialActive: os.Getenv("JIRO_PASSWORD") != "" || os.Getenv("JIRO_TOKEN") != "",
 			}
 			return a.render(result, output.Table{
-				Headers: []string{"FIELD", "VALUE"},
+				Columns: []output.Column{output.Fixed("FIELD"), output.Flexible("VALUE")},
 				Rows: [][]string{
 					{"Profile", result.Profile}, {"Credential Store", result.CredentialStore},
 					{"Credential Removed", fmt.Sprint(result.CredentialRemoved)},
@@ -192,7 +192,7 @@ func (a *app) authStatusCommand() *cobra.Command {
 				AuthType: settings.AuthType, User: user,
 			}
 			return a.render(result, output.Table{
-				Headers: []string{"FIELD", "VALUE"},
+				Columns: []output.Column{output.Fixed("FIELD"), output.Flexible("VALUE")},
 				Rows: [][]string{
 					{"Profile", result.Profile}, {"Jira Instance", result.Instance},
 					{"Auth Type", string(result.AuthType)}, {"User", displayUser(result.User)},

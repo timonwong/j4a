@@ -1,13 +1,15 @@
-// Package output renders stable jiro command results.
+// Package output renders jiro command results.
 package output
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
+	"unicode"
 
+	"github.com/charmbracelet/x/ansi"
+	"github.com/cli/go-gh/v2/pkg/tableprinter"
 	"github.com/timonwong/jiro/internal/apperr"
 )
 
@@ -41,7 +43,14 @@ type Renderer struct {
 	Stderr   io.Writer
 	Format   Format
 	Quiet    bool
+	terminal Terminal
 	warnings []Warning
+}
+
+// Terminal describes the output terminal capabilities used for text tables.
+type Terminal struct {
+	IsTTY bool
+	Width int
 }
 
 // Warning describes a non-fatal condition encountered while producing a
@@ -70,6 +79,12 @@ func New(stdout, stderr io.Writer, format Format, quiet bool) Renderer {
 // output. Warnings are emitted in JSON and text modes.
 func (r Renderer) WithWarnings(warnings ...Warning) Renderer {
 	r.warnings = append([]Warning(nil), warnings...)
+	return r
+}
+
+// WithTerminal returns a copy of r configured for terminal-aware tables.
+func (r Renderer) WithTerminal(terminal Terminal) Renderer {
+	r.terminal = terminal
 	return r
 }
 
@@ -142,68 +157,105 @@ func (r Renderer) Error(err error) error {
 	return writeErr
 }
 
-// Table is a deliberately simple deterministic text table.
+// Column describes one explicitly fixed or flexible text-table column.
+type Column struct {
+	header string
+	fixed  bool
+}
+
+// Fixed creates a column whose values are never truncated.
+func Fixed(header string) Column {
+	return Column{header: header, fixed: true}
+}
+
+// Flexible creates a column whose values may be truncated to the viewport.
+func Flexible(header string) Column {
+	return Column{header: header}
+}
+
+// Table describes column-oriented human-readable output.
 type Table struct {
-	Headers []string
+	Columns []Column
 	Rows    [][]string
 }
 
-// Table writes a deterministic padded table to stdout.
+// Table writes a terminal-aware table or non-terminal TSV to stdout.
 func (r Renderer) Table(table Table) error {
+	if len(table.Columns) == 0 {
+		return fmt.Errorf("table requires at least one column")
+	}
+	for i, column := range table.Columns {
+		if strings.TrimSpace(sanitizeCell(column.header)) == "" {
+			return fmt.Errorf("table column %d header must not be blank", i)
+		}
+	}
+	for i, row := range table.Rows {
+		if len(row) != len(table.Columns) {
+			return fmt.Errorf("table row %d has %d cells, want %d", i, len(row), len(table.Columns))
+		}
+	}
 	if r.Quiet {
 		return nil
 	}
-	columns := len(table.Headers)
+	headers := make([]string, len(table.Columns))
+	for i, column := range table.Columns {
+		headers[i] = sanitizeCell(column.header)
+	}
+	width := r.terminal.Width
+	if r.terminal.IsTTY && width <= 0 {
+		width = 80
+	}
+	tracked := &trackingWriter{writer: r.Stdout}
+	printer := tableprinter.New(tracked, r.terminal.IsTTY, width)
+	printer.AddHeader(headers)
 	for _, row := range table.Rows {
-		if len(row) > columns {
-			columns = len(row)
-		}
-	}
-	if columns == 0 {
-		return nil
-	}
-	widths := make([]int, columns)
-	consider := func(row []string) {
 		for i, cell := range row {
-			if len(cell) > widths[i] {
-				widths[i] = len(cell)
+			cell = sanitizeCell(cell)
+			if table.Columns[i].fixed {
+				printer.AddField(cell, tableprinter.WithTruncate(nil))
+			} else {
+				printer.AddField(cell)
+			}
+		}
+		printer.EndRow()
+	}
+	if err := printer.Render(); err != nil {
+		return err
+	}
+	return tracked.err
+}
+
+type trackingWriter struct {
+	writer io.Writer
+	err    error
+}
+
+func (w *trackingWriter) Write(value []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	written, err := w.writer.Write(value)
+	if err != nil {
+		w.err = err
+	}
+	return written, err
+}
+
+func sanitizeCell(value string) string {
+	value = strings.ReplaceAll(ansi.Strip(value), "\r\n", "\n")
+	var result strings.Builder
+	result.Grow(len(value))
+	for _, char := range value {
+		switch char {
+		case '\r', '\n', '\t':
+			result.WriteByte(' ')
+		default:
+			if !unicode.IsControl(char) {
+				result.WriteRune(char)
 			}
 		}
 	}
-	consider(table.Headers)
-	for _, row := range table.Rows {
-		consider(row)
-	}
-	var buffer bytes.Buffer
-	writeRow := func(row []string) {
-		for i := 0; i < columns; i++ {
-			if i > 0 {
-				buffer.WriteString("  ")
-			}
-			cell := ""
-			if i < len(row) {
-				cell = row[i]
-			}
-			buffer.WriteString(cell)
-			if padding := widths[i] - len(cell); padding > 0 {
-				buffer.WriteString(strings.Repeat(" ", padding))
-			}
-		}
-		buffer.WriteByte('\n')
-	}
-	if len(table.Headers) > 0 {
-		writeRow(table.Headers)
-		separator := make([]string, columns)
-		for i := range separator {
-			separator[i] = strings.Repeat("-", widths[i])
-		}
-		writeRow(separator)
-	}
-	for _, row := range table.Rows {
-		writeRow(row)
-	}
-	_, err := r.Stdout.Write(buffer.Bytes())
-	return err
+	return result.String()
 }
 
 func writeJSON(writer io.Writer, value any) error {

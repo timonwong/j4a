@@ -23,6 +23,7 @@ type app struct {
 	stderr io.Writer
 
 	terminal    loginTerminal
+	outputTTY   outputTerminalDetector
 	secretStore config.SecretStore
 	fieldStore  fieldcache.Store
 	warnings    []output.Warning
@@ -68,7 +69,11 @@ func (a *app) rootCommand() *cobra.Command {
 		Version:       version,
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(command *cobra.Command, _ []string) error {
+			if command.Name() == "schema" {
+				_, err := output.ParseFormat(a.output)
+				return err
+			}
 			_, err := a.renderer()
 			return err
 		},
@@ -107,7 +112,18 @@ func (a *app) renderer() (output.Renderer, error) {
 	if err != nil {
 		return output.Renderer{}, err
 	}
-	return output.New(a.stdout, a.stderr, format, a.quiet).WithWarnings(a.warnings...), nil
+	terminal := output.Terminal{}
+	if format == output.FormatText {
+		forceTTY, err := parseForceTTY()
+		if err != nil {
+			return output.Renderer{}, err
+		}
+		if a.outputTTY == nil {
+			a.outputTTY = streamOutputTerminal{}
+		}
+		terminal = a.outputTTY.Detect(a.stdout, forceTTY)
+	}
+	return output.New(a.stdout, a.stderr, format, a.quiet).WithTerminal(terminal).WithWarnings(a.warnings...), nil
 }
 
 func (a *app) addWarning(warning output.Warning) {

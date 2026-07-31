@@ -69,7 +69,7 @@ func TestJSONOutputAndBasicAuth(t *testing.T) {
 	}
 }
 
-func TestTextDefaultAndSingularAlias(t *testing.T) {
+func TestTextTableUsesOutputTerminalMode(t *testing.T) {
 	clearCommandEnv(t)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/rest/api/2/search" || request.Method != http.MethodPost {
@@ -91,8 +91,21 @@ func TestTextDefaultAndSingularAlias(t *testing.T) {
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "OPS-1") || strings.Contains(stdout.String(), "schemaVersion") {
-		t.Fatalf("unexpected text output: %s", stdout.String())
+	const wantTSV = "OPS-1\tFix login\tOpen\tAlice\n"
+	if stdout.String() != wantTSV {
+		t.Fatalf("stdout=%q, want %q", stdout.String(), wantTSV)
+	}
+
+	t.Setenv("JIRO_FORCE_TTY", "1")
+	stdout.Reset()
+	stderr.Reset()
+	code = Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "issue", "list", "--project", "OPS"}, strings.NewReader(""), stdout, stderr)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("forced TTY code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	const wantTTY = "KEY    SUMMARY    STATUS  ASSIGNEE\nOPS-1  Fix login  Open    Alice\n"
+	if stdout.String() != wantTTY {
+		t.Fatalf("forced TTY stdout=%q, want %q", stdout.String(), wantTTY)
 	}
 }
 
@@ -485,6 +498,44 @@ func TestInvalidOutputFailsBeforeNetwork(t *testing.T) {
 	}
 }
 
+func TestInvalidForceTTYOnlyAffectsTextBeforeNetwork(t *testing.T) {
+	clearCommandEnv(t)
+	t.Setenv("JIRO_FORCE_TTY", "sometimes")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls.Add(1)
+		if request.URL.Path != "/rest/api/2/myself" {
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+		_, _ = io.WriteString(writer, `{"name":"alice","displayName":"Alice","active":true}`)
+	}))
+	defer server.Close()
+	configPath := writeCLIConfig(t, server.URL, false)
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{"--config", configPath, "auth", "status"}, strings.NewReader(""), stdout, stderr)
+	if code != 2 || calls.Load() != 0 || stdout.Len() != 0 || stderr.String() != "JIRO_FORCE_TTY must be a boolean\n" {
+		t.Fatalf("text code=%d calls=%d stdout=%q stderr=%q", code, calls.Load(), stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = Execute([]string{"--config", configPath, "-ojson", "auth", "status"}, strings.NewReader(""), stdout, stderr)
+	if code != 0 || calls.Load() != 1 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"schemaVersion":"1"`) {
+		t.Fatalf("JSON code=%d calls=%d stdout=%q stderr=%q", code, calls.Load(), stdout.String(), stderr.String())
+	}
+}
+
+func TestInvalidForceTTYDoesNotAffectSchema(t *testing.T) {
+	clearCommandEnv(t)
+	t.Setenv("JIRO_FORCE_TTY", "sometimes")
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{"schema"}, strings.NewReader(""), stdout, stderr)
+	if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"contractVersion":"3"`) {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
 func writeCLIConfig(t *testing.T, host string, readOnly bool) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.toml")
@@ -499,7 +550,7 @@ func clearCommandEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
 		"JIRO_CONFIG_FILE", "JIRO_CONFIG", "JIRO_PROFILE", "JIRO_HOST", "JIRO_USERNAME", "JIRO_AUTH_TYPE",
-		"JIRO_API_VERSION", "JIRO_READ_ONLY", "JIRO_USE_KEYRING", "JIRO_PASSWORD", "JIRO_TOKEN",
+		"JIRO_API_VERSION", "JIRO_READ_ONLY", "JIRO_USE_KEYRING", "JIRO_PASSWORD", "JIRO_TOKEN", "JIRO_FORCE_TTY",
 	} {
 		t.Setenv(name, "")
 		if err := os.Unsetenv(name); err != nil {

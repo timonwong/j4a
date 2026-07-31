@@ -247,7 +247,10 @@ func issueBatchTable(result issueBatchResult) output.Table {
 	for _, item := range result.Items {
 		rows = append(rows, []string{item.IssueKey, item.Outcome, item.Error})
 	}
-	return output.Table{Headers: []string{"ISSUE", "OUTCOME", "ERROR"}, Rows: rows}
+	return output.Table{
+		Columns: []output.Column{output.Fixed("ISSUE"), output.Flexible("OUTCOME"), output.Flexible("ERROR")},
+		Rows:    rows,
+	}
 }
 
 func isSystemicIssueError(err error) bool {
