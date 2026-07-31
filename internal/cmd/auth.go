@@ -108,9 +108,6 @@ func (a *app) authLoginCommand() *cobra.Command {
 		Short: "Authenticate and save a Jira Profile",
 		Args:  exactArgs(0),
 		RunE: func(command *cobra.Command, _ []string) error {
-			if a.raw {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for auth login")
-			}
 			draft, err := config.LoadDraft(a.configOptions())
 			if err != nil {
 				return err
@@ -151,9 +148,6 @@ func (a *app) authLogoutCommand() *cobra.Command {
 		Short: "Remove a Jira Profile credential",
 		Args:  exactArgs(0),
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if a.raw {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for auth logout")
-			}
 			removed, err := config.Logout(a.configOptions(), a.secretStore)
 			if err != nil {
 				return err
@@ -185,9 +179,6 @@ func (a *app) authStatusCommand() *cobra.Command {
 		Short: "Verify the current Jira authentication",
 		Args:  exactArgs(0),
 		RunE: func(command *cobra.Command, _ []string) error {
-			if a.raw {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for auth status")
-			}
 			client, settings, err := a.client()
 			if err != nil {
 				return err

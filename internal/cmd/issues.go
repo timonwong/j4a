@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -12,25 +10,25 @@ import (
 	"github.com/timonwong/jiro/internal/output"
 )
 
-func (a *app) issuesCommand() *cobra.Command {
-	command := &cobra.Command{Use: "issues", Aliases: []string{"issue"}, Short: "Work with Jira issues"}
+func (a *app) issueCommand() *cobra.Command {
+	command := &cobra.Command{Use: "issue", Short: "Work with Jira issues"}
+	comment := &cobra.Command{Use: "comment", Short: "Work with issue comments"}
+	comment.AddCommand(a.issueCommentCommand(), a.issueCommentsCommand())
+	link := &cobra.Command{Use: "link", Short: "Work with issue links"}
+	link.AddCommand(a.issueLinkCommand(), a.issueLinksCommand(), a.issueUnlinkCommand(), a.issueLinkTypesCommand())
+	bulk := &cobra.Command{Use: "bulk", Short: "Apply one action to issues selected by JQL"}
+	bulk.AddCommand(a.issueBulkTransitionCommand(), a.issueBulkAssignCommand())
 	command.AddCommand(
 		a.issuesListCommand(),
 		a.issueShowCommand(),
 		a.issueCreateCommand(),
 		a.issueUpdateCommand(),
-		a.issueCommentsCommand(),
-		a.issueCommentCommand(),
 		a.issueTransitionsCommand(),
 		a.issueTransitionCommand(),
 		a.issueAssignCommand(),
-		a.issueMoveCommand(),
-		a.issueLinksCommand(),
-		a.issueLinkCommand(),
-		a.issueUnlinkCommand(),
-		a.issueLinkTypesCommand(),
-		a.issueBulkTransitionCommand(),
-		a.issueBulkAssignCommand(),
+		comment,
+		link,
+		bulk,
 	)
 	return command
 }
@@ -63,13 +61,6 @@ func (a *app) issuesListCommand() *cobra.Command {
 			})
 			if err != nil {
 				return err
-			}
-			if isRaw(a) {
-				if all {
-					return apperr.New(apperr.KindInvalidInput, "--all cannot be combined with --raw")
-				}
-				payload := searchPayload(jql, offset, limit, fields)
-				return a.rawRequest(command.Context(), client, http.MethodPost, "rest/api/2/search", nil, payload)
 			}
 			var result jira.SearchResult
 			if all {
@@ -121,13 +112,6 @@ func (a *app) issueShowCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if isRaw(a) {
-				query := url.Values{}
-				if len(fields) > 0 {
-					query.Set("fields", strings.Join(fields, ","))
-				}
-				return a.rawRequest(command.Context(), client, http.MethodGet, issuePath(args[0]), query, nil)
-			}
 			issue, err := client.ShowIssue(command.Context(), args[0], fields)
 			if err != nil {
 				return err
@@ -144,15 +128,12 @@ func (a *app) issueCreateCommand() *cobra.Command {
 	var priority, assignee string
 	var labels, components, fixVersions, fields []string
 	command := &cobra.Command{
-		Use:   "create",
+		Use:   "add",
 		Short: "Create an issue",
 		Args:  exactArgs(0),
 		RunE: func(command *cobra.Command, _ []string) error {
 			if strings.TrimSpace(project) == "" || strings.TrimSpace(issueType) == "" || strings.TrimSpace(summary) == "" {
 				return apperr.New(apperr.KindInvalidInput, "project, type, and summary are required")
-			}
-			if strings.TrimSpace(sprint) != "" && isRaw(a) {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for issues create --sprint")
 			}
 			client, settings, err := a.writableClient()
 			if err != nil {
@@ -183,9 +164,6 @@ func (a *app) issueCreateCommand() *cobra.Command {
 			input := jira.CreateIssueInput{
 				ProjectKey: project, IssueType: issueType, Summary: summary,
 				Description: descriptionValue, Fields: resolvedFields,
-			}
-			if isRaw(a) {
-				return a.rawRequest(command.Context(), client, http.MethodPost, "rest/api/2/issue", nil, createPayload(input))
 			}
 			issue, err := client.CreateIssue(command.Context(), input)
 			if err != nil {
@@ -226,7 +204,7 @@ func (a *app) issueCreateCommand() *cobra.Command {
 
 func (a *app) issueUpdateCommand() *cobra.Command {
 	var summary, description, descriptionFile, inputFormat string
-	var priority, assignee string
+	var priority, assignee, sprint string
 	var labels, components, fixVersions, fields []string
 	command := &cobra.Command{
 		Use:   "update ISSUE-KEY",
@@ -249,6 +227,14 @@ func (a *app) issueUpdateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var resolvedSprint *jira.Sprint
+			if strings.TrimSpace(sprint) != "" {
+				value, err := client.ResolveSprint(command.Context(), sprint)
+				if err != nil {
+					return err
+				}
+				resolvedSprint = &value
+			}
 			resolvedFields, err := a.resolveFields(command.Context(), client, settings, fields)
 			if err != nil {
 				return err
@@ -260,16 +246,30 @@ func (a *app) issueUpdateCommand() *cobra.Command {
 			if command.Flags().Changed("summary") {
 				input.Summary = &summary
 			}
-			if input.Summary == nil && input.Description == nil && len(input.Fields) == 0 {
+			hasFieldUpdate := input.Summary != nil || input.Description != nil || len(input.Fields) > 0
+			if !hasFieldUpdate && resolvedSprint == nil {
 				return apperr.New(apperr.KindInvalidInput, "at least one issue field is required")
 			}
-			if isRaw(a) {
-				return a.rawRequest(command.Context(), client, http.MethodPut, issuePath(args[0]), nil, updatePayload(input))
-			}
-			if err := client.UpdateIssue(command.Context(), args[0], input); err != nil {
-				return err
+			if hasFieldUpdate {
+				if err := client.UpdateIssue(command.Context(), args[0], input); err != nil {
+					return err
+				}
 			}
 			result := map[string]any{"key": args[0], "updated": true}
+			if resolvedSprint != nil {
+				result["sprint"] = sprint
+				if err := client.AddIssuesToSprint(command.Context(), resolvedSprint.ID, []string{args[0]}); err != nil {
+					if !hasFieldUpdate {
+						return err
+					}
+					result["sprintMoved"] = false
+					if renderErr := a.renderPartial(result, "Updated "+args[0]); renderErr != nil {
+						return renderErr
+					}
+					return apperr.Wrap(apperr.KindPartialFailure, err, "updated %s but failed to move it to sprint %q: %v", args[0], sprint, err)
+				}
+				result["sprintMoved"] = true
+			}
 			return a.renderMessage(result, "Updated "+args[0])
 		},
 	}
@@ -283,6 +283,7 @@ func (a *app) issueUpdateCommand() *cobra.Command {
 	flags.StringSliceVar(&labels, "label", nil, "replacement labels; repeat or pass comma-separated values")
 	flags.StringSliceVar(&components, "component", nil, "replacement component names; use a single none to clear")
 	flags.StringSliceVar(&fixVersions, "fix-version", nil, "replacement fix version names; use a single none to clear")
+	flags.StringVar(&sprint, "sprint", "", "sprint ID, name substring, or active")
 	flags.StringArrayVar(&fields, "field", nil, "custom field as key=value; repeatable")
 	return command
 }
@@ -290,7 +291,7 @@ func (a *app) issueUpdateCommand() *cobra.Command {
 func (a *app) issueCommentsCommand() *cobra.Command {
 	var limit, offset int
 	command := &cobra.Command{
-		Use:   "comments ISSUE-KEY",
+		Use:   "list ISSUE-KEY",
 		Short: "List issue comments",
 		Args:  exactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
@@ -300,9 +301,6 @@ func (a *app) issueCommentsCommand() *cobra.Command {
 			client, _, err := a.client()
 			if err != nil {
 				return err
-			}
-			if isRaw(a) {
-				return a.rawRequest(command.Context(), client, http.MethodGet, issuePath(args[0])+"/comment", pageQuery(offset, limit), nil)
 			}
 			comments, err := client.Comments(command.Context(), args[0], jira.Page{StartAt: offset, MaxResults: limit})
 			if err != nil {
@@ -328,7 +326,7 @@ func (a *app) issueCommentsCommand() *cobra.Command {
 func (a *app) issueCommentCommand() *cobra.Command {
 	var body, bodyFile, inputFormat string
 	command := &cobra.Command{
-		Use:   "comment ISSUE-KEY",
+		Use:   "add ISSUE-KEY",
 		Short: "Add an issue comment",
 		Args:  exactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
@@ -352,9 +350,6 @@ func (a *app) issueCommentCommand() *cobra.Command {
 				return err
 			}
 			input := jira.CommentInput{Body: *bodyValue}
-			if isRaw(a) {
-				return a.rawRequest(command.Context(), client, http.MethodPost, issuePath(args[0])+"/comment", nil, input)
-			}
 			comment, err := client.Comment(command.Context(), args[0], input)
 			if err != nil {
 				return err
@@ -379,9 +374,6 @@ func (a *app) issueTransitionsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if isRaw(a) {
-				return a.rawRequest(command.Context(), client, http.MethodGet, issuePath(args[0])+"/transitions", nil, nil)
-			}
 			transitions, err := client.ListTransitions(command.Context(), args[0])
 			if err != nil {
 				return err
@@ -405,7 +397,7 @@ func (a *app) issueTransitionCommand() *cobra.Command {
 	var target string
 	var fields []string
 	command := &cobra.Command{
-		Use:   "transition ISSUE-KEY",
+		Use:   "move ISSUE-KEY",
 		Short: "Transition an issue",
 		Args:  exactArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
@@ -429,13 +421,6 @@ func (a *app) issueTransitionCommand() *cobra.Command {
 				return err
 			}
 			input := jira.TransitionInput{ID: transition.ID, Fields: resolvedFields}
-			if isRaw(a) {
-				payload := map[string]any{"transition": map[string]string{"id": input.ID}}
-				if len(input.Fields) > 0 {
-					payload["fields"] = input.Fields
-				}
-				return a.rawRequest(command.Context(), client, http.MethodPost, issuePath(args[0])+"/transitions", nil, payload)
-			}
 			if err := client.Transition(command.Context(), args[0], input); err != nil {
 				return err
 			}
@@ -446,48 +431,6 @@ func (a *app) issueTransitionCommand() *cobra.Command {
 	command.Flags().StringVar(&target, "to", "", "transition ID or name")
 	command.Flags().StringArrayVar(&fields, "field", nil, "transition field as key=value; repeatable")
 	return command
-}
-
-func searchPayload(jql string, offset, limit int, fields []string) map[string]any {
-	payload := map[string]any{"jql": jql}
-	if offset > 0 {
-		payload["startAt"] = offset
-	}
-	if limit > 0 {
-		payload["maxResults"] = limit
-	}
-	if len(fields) > 0 {
-		payload["fields"] = fields
-	}
-	return payload
-}
-
-func createPayload(input jira.CreateIssueInput) map[string]any {
-	fields := make(map[string]any, len(input.Fields)+4)
-	for key, value := range input.Fields {
-		fields[key] = value
-	}
-	fields["project"] = map[string]string{"key": input.ProjectKey}
-	fields["issuetype"] = map[string]string{"name": input.IssueType}
-	fields["summary"] = input.Summary
-	if input.Description != nil {
-		fields["description"] = *input.Description
-	}
-	return map[string]any{"fields": fields}
-}
-
-func updatePayload(input jira.UpdateIssueInput) map[string]any {
-	fields := make(map[string]any, len(input.Fields)+2)
-	for key, value := range input.Fields {
-		fields[key] = value
-	}
-	if input.Summary != nil {
-		fields["summary"] = *input.Summary
-	}
-	if input.Description != nil {
-		fields["description"] = *input.Description
-	}
-	return map[string]any{"fields": fields}
 }
 
 func applyStandardFields(fields map[string]any, priority, assignee string, labels []string, labelsSet bool) {

@@ -46,7 +46,7 @@ func TestBulkTransitionDryRunPreflightsEveryJQLPage(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, true), "-ojson", "issues", "bulk-transition",
+		"--config", writeCLIConfig(t, server.URL, true), "-ojson", "issue", "bulk", "move",
 		"--jql", "project = OPS", "--to", "Done", "--dry-run",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 7 {
@@ -107,7 +107,7 @@ func TestBulkTransitionStopsOnSystemicFailureAndMarksRemaining(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "bulk-transition",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "bulk", "move",
 		"--jql", "project = OPS", "--to", "Done", "--yes",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 7 {
@@ -173,7 +173,7 @@ func TestBulkAssignResolvesMeOnceAndContinuesAfterIssueFailure(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "bulk-assign",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "bulk", "assign",
 		"--jql", "project = OPS", "--assignee", "me", "--yes",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 7 || myselfCalls != 1 {
@@ -213,7 +213,7 @@ func TestBulkAssignNoMatchesIsSuccessfulWithoutUserLookup(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, true), "-ojson", "issues", "bulk-assign",
+		"--config", writeCLIConfig(t, server.URL, true), "-ojson", "issue", "bulk", "assign",
 		"--jql", "project = EMPTY", "--assignee", "me", "--dry-run",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"total":0`) {
@@ -233,7 +233,7 @@ func TestBulkTransitionNoMatchesSkipsFieldAliasResolution(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, true), "-ojson", "issues", "bulk-transition",
+		"--config", writeCLIConfig(t, server.URL, true), "-ojson", "issue", "bulk", "move",
 		"--jql", "project = EMPTY", "--to", "Done", "--field", "unknown-alias=1", "--dry-run",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"total":0`) {
@@ -249,10 +249,8 @@ func TestBulkCommandGuardsRunBeforeNetworkOrCredentialResolution(t *testing.T) {
 	configPath := writeCLIConfig(t, server.URL, false)
 
 	tests := [][]string{
-		{"--config", configPath, "--raw", "issues", "bulk-assign", "--jql", "project = OPS", "--assignee", "alice", "--dry-run"},
-		{"--config", configPath, "issues", "bulk-transition", "--jql", "project = OPS", "--to", "Done"},
-		{"--config", configPath, "issues", "bulk-transition", "--jql", "project = OPS", "--to", "Done", "--dry-run", "--yes"},
-		{"--config", configPath, "--raw", "issues", "create", "--project", "OPS", "--type", "Task", "--summary", "No raw composite", "--sprint", "42"},
+		{"--config", configPath, "issue", "bulk", "move", "--jql", "project = OPS", "--to", "Done"},
+		{"--config", configPath, "issue", "bulk", "move", "--jql", "project = OPS", "--to", "Done", "--dry-run", "--yes"},
 	}
 	for _, args := range tests {
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
@@ -270,7 +268,7 @@ func TestBulkCommandGuardsRunBeforeNetworkOrCredentialResolution(t *testing.T) {
 	}
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", readOnlyPath, "issues", "bulk-assign", "--jql", "project = OPS", "--assignee", "alice", "--yes",
+		"--config", readOnlyPath, "issue", "bulk", "assign", "--jql", "project = OPS", "--assignee", "alice", "--yes",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "read_only") {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -300,7 +298,7 @@ func TestBulkTransitionResolvesCommonFieldAliasesOnce(t *testing.T) {
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := &app{stdin: strings.NewReader(""), stdout: stdout, stderr: stderr, fieldStore: fieldcache.New(t.TempDir(), nil)}
 	code := a.execute([]string{
-		"--config", writeCLIConfig(t, server.URL, true), "-ojson", "issues", "bulk-transition",
+		"--config", writeCLIConfig(t, server.URL, true), "-ojson", "issue", "bulk", "move",
 		"--jql", "project = OPS", "--to", "Done", "--field", "story-points=5", "--dry-run",
 	})
 	if code != 0 || stderr.Len() != 0 || fieldCalls.Load() != 1 {
