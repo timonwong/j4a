@@ -4,6 +4,7 @@ package markup
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	extensionast "github.com/yuin/goldmark/extension/ast"
+	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
 )
@@ -53,8 +55,13 @@ func ToJira(input string, format InputFormat) (string, error) {
 	}
 
 	source := []byte(input)
-	parser := goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough))
-	document := parser.Parser().Parse(text.NewReader(source))
+	markdownParser := goldmark.New(
+		goldmark.WithExtensions(extension.Table, extension.Strikethrough),
+		goldmark.WithParserOptions(parser.WithBlockParsers(
+			util.Prioritized(jiraListParser{BlockParser: parser.NewListParser()}, 299),
+		)),
+	)
+	document := markdownParser.Parser().Parse(text.NewReader(source))
 	result, err := jiraMarkupRenderer{source: source}.renderDocument(document)
 	if err != nil {
 		return "", err
@@ -64,6 +71,64 @@ func ToJira(input string, format InputFormat) (string, error) {
 
 type jiraMarkupRenderer struct {
 	source []byte
+}
+
+// jiraListParser preserves Goldmark's list behavior except that Jira's
+// Markdown Input dialect lets any non-empty ordered list interrupt a paragraph.
+type jiraListParser struct {
+	parser.BlockParser
+}
+
+func (p jiraListParser) Open(parent ast.Node, reader text.Reader, context parser.Context) (ast.Node, parser.State) {
+	if _, isList := parent.(*ast.List); isList {
+		return nil, parser.NoChildren
+	}
+	last := context.LastOpenedBlock().Node
+	if !ast.IsParagraph(last) || last.Parent() != parent {
+		return nil, parser.NoChildren
+	}
+	line, _ := reader.PeekLine()
+	marker, start, ok := orderedListInterrupt(line)
+	if !ok || start == 1 {
+		return nil, parser.NoChildren
+	}
+	list := ast.NewList(marker)
+	list.Start = start
+	return list, parser.HasChildren
+}
+
+func orderedListInterrupt(line []byte) (byte, int, bool) {
+	index := 0
+	for index < len(line) && line[index] == ' ' {
+		index++
+	}
+	if index > 3 {
+		return 0, 0, false
+	}
+	startIndex := index
+	for index < len(line) && line[index] >= '0' && line[index] <= '9' {
+		index++
+	}
+	if digitCount := index - startIndex; digitCount == 0 || digitCount > 9 || index >= len(line) {
+		return 0, 0, false
+	}
+	marker := line[index]
+	if marker != '.' && marker != ')' {
+		return 0, 0, false
+	}
+	start, err := strconv.Atoi(string(line[startIndex:index]))
+	if err != nil {
+		return 0, 0, false
+	}
+	index++
+	if index >= len(line) || util.IsBlank(line[index:]) {
+		return 0, 0, false
+	}
+	indentWidth, _ := util.IndentWidth(line[index:], index)
+	if indentWidth == 0 {
+		return 0, 0, false
+	}
+	return marker, start, true
 }
 
 func (r jiraMarkupRenderer) renderDocument(document ast.Node) (string, error) {
@@ -93,7 +158,9 @@ func (r jiraMarkupRenderer) renderBlock(node ast.Node) (string, error) {
 		}
 		return heading, nil
 	case *ast.List:
-		return r.renderSimpleList(typed)
+		return r.renderList(typed, "")
+	case *ast.Blockquote:
+		return r.renderBlockquote(typed)
 	case *ast.ThematicBreak:
 		return "----", nil
 	case *ast.HTMLBlock:
@@ -103,7 +170,32 @@ func (r jiraMarkupRenderer) renderBlock(node ast.Node) (string, error) {
 	}
 }
 
-func (r jiraMarkupRenderer) renderSimpleList(list *ast.List) (string, error) {
+func (r jiraMarkupRenderer) renderBlockquote(blockquote *ast.Blockquote) (string, error) {
+	paragraphs := make([]string, 0, blockquote.ChildCount())
+	for child := blockquote.FirstChild(); child != nil; child = child.NextSibling() {
+		paragraph, ok := child.(*ast.Paragraph)
+		if !ok {
+			return "", r.conversionError(child, "blockquotes support paragraphs only")
+		}
+		content, err := r.renderInlines(paragraph, true)
+		if err != nil {
+			return "", err
+		}
+		paragraphs = append(paragraphs, content)
+	}
+	return "{quote}\n" + strings.Join(paragraphs, "\n\n") + "\n{quote}", nil
+}
+
+func (r jiraMarkupRenderer) renderList(list *ast.List, parentMarkers string) (string, error) {
+	for child := list.FirstChild(); child != nil; child = child.NextSibling() {
+		item, ok := child.(*ast.ListItem)
+		if !ok {
+			return "", r.unsupported(list)
+		}
+		if err := r.validateListItem(item); err != nil {
+			return "", err
+		}
+	}
 	if !list.IsTight {
 		return "", r.unsupported(list)
 	}
@@ -111,27 +203,56 @@ func (r jiraMarkupRenderer) renderSimpleList(list *ast.List) (string, error) {
 	if list.IsOrdered() {
 		marker = "#"
 	}
+	marker = parentMarkers + marker
 	items := make([]string, 0, list.ChildCount())
 	for child := list.FirstChild(); child != nil; child = child.NextSibling() {
 		item, ok := child.(*ast.ListItem)
-		if !ok || item.ChildCount() != 1 {
-			return "", r.unsupported(list)
-		}
-		textBlock, ok := item.FirstChild().(*ast.TextBlock)
 		if !ok {
 			return "", r.unsupported(list)
 		}
-		content, err := r.renderInlines(textBlock, false)
-		if err != nil {
-			return "", err
-		}
 		itemMarkup := marker
-		if content != "" {
-			itemMarkup += " " + content
+		for itemChild := item.FirstChild(); itemChild != nil; itemChild = itemChild.NextSibling() {
+			switch typed := itemChild.(type) {
+			case *ast.TextBlock:
+				content, err := r.renderInlines(typed, false)
+				if err != nil {
+					return "", err
+				}
+				if content != "" {
+					itemMarkup += " " + content
+				}
+			case *ast.List:
+				nested, err := r.renderList(typed, marker)
+				if err != nil {
+					return "", err
+				}
+				itemMarkup += "\n" + nested
+			default:
+				return "", r.unsupported(itemChild)
+			}
 		}
 		items = append(items, itemMarkup)
 	}
 	return strings.Join(items, "\n"), nil
+}
+
+func (r jiraMarkupRenderer) validateListItem(item *ast.ListItem) error {
+	hasParagraph := false
+	hasNestedList := false
+	for child := item.FirstChild(); child != nil; child = child.NextSibling() {
+		switch child.(type) {
+		case *ast.TextBlock, *ast.Paragraph:
+			if hasParagraph || hasNestedList {
+				return r.conversionError(child, "list items support one paragraph followed only by nested lists")
+			}
+			hasParagraph = true
+		case *ast.List:
+			hasNestedList = true
+		default:
+			return r.conversionError(child, "list items support one paragraph followed only by nested lists")
+		}
+	}
+	return nil
 }
 
 func (r jiraMarkupRenderer) renderInlines(parent ast.Node, atLineStart bool) (string, error) {
@@ -261,12 +382,16 @@ func (r jiraMarkupRenderer) renderCodeSpan(code *ast.CodeSpan) (string, error) {
 }
 
 func (r jiraMarkupRenderer) unsupported(node ast.Node) *ConversionError {
+	return r.conversionError(node, "unsupported Markdown Input syntax")
+}
+
+func (r jiraMarkupRenderer) conversionError(node ast.Node, reason string) *ConversionError {
 	line, column := sourcePosition(r.source, node)
 	return &ConversionError{
 		Line:     line,
 		Column:   column,
 		NodeType: node.Kind().String(),
-		Reason:   "unsupported Markdown Input syntax",
+		Reason:   reason,
 	}
 }
 
