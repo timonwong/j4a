@@ -1,1 +1,0 @@
-"Release plan\n\n* \\[x\\] prepare\n*# build\n*#* linux\n*#* macOS\n*# publish\n*## staging\n*## production\n** verify artifacts\n* \\[ \\] approve"

@@ -177,19 +177,19 @@ func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing
 			name: "issue create",
 			args: []string{
 				"issues", "create", "--project", "OPS", "--type", "Story", "--summary", "Unsupported input",
-				"--description", "```go\nunsupported\n```", "--input-format=markdown", "--field", "story-points=5",
+				"--description", "```go\ncode\n```", "--input-format=markdown", "--field", "story-points=5",
 			},
 		},
 		{
 			name: "issue update",
 			args: []string{
-				"issues", "update", "OPS-1", "--description", "```go\nunsupported\n```", "--input-format=markdown",
+				"issues", "update", "OPS-1", "--description", "```go\ncode\n```", "--input-format=markdown",
 				"--field", "story-points=5",
 			},
 		},
 		{
 			name: "issue comment",
-			args: []string{"issues", "comment", "OPS-1", "--body", "```go\nunsupported\n```", "--input-format=markdown"},
+			args: []string{"issues", "comment", "OPS-1", "--body", "```go\ncode\n```", "--input-format=markdown"},
 		},
 	}
 	for _, test := range tests {

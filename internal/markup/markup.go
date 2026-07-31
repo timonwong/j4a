@@ -131,6 +131,11 @@ func orderedListInterrupt(line []byte) (byte, int, bool) {
 	return marker, start, true
 }
 
+const (
+	listItemBlockReason   = "list items may contain only text and nested lists"
+	blockquoteBlockReason = "blockquotes may contain only paragraphs"
+)
+
 func (r jiraMarkupRenderer) renderDocument(document ast.Node) (string, error) {
 	blocks := make([]string, 0, document.ChildCount())
 	for node := document.FirstChild(); node != nil; node = node.NextSibling() {
@@ -175,7 +180,7 @@ func (r jiraMarkupRenderer) renderBlockquote(blockquote *ast.Blockquote) (string
 	for child := blockquote.FirstChild(); child != nil; child = child.NextSibling() {
 		paragraph, ok := child.(*ast.Paragraph)
 		if !ok {
-			return "", r.conversionError(child, "blockquotes support paragraphs only")
+			return "", r.conversionError(child, blockquoteBlockReason)
 		}
 		content, err := r.renderInlines(paragraph, true)
 		if err != nil {
@@ -187,72 +192,53 @@ func (r jiraMarkupRenderer) renderBlockquote(blockquote *ast.Blockquote) (string
 }
 
 func (r jiraMarkupRenderer) renderList(list *ast.List, parentMarkers string) (string, error) {
-	for child := list.FirstChild(); child != nil; child = child.NextSibling() {
-		item, ok := child.(*ast.ListItem)
-		if !ok {
-			return "", r.unsupported(list)
-		}
-		if err := r.validateListItem(item); err != nil {
-			return "", err
-		}
-	}
 	if !list.IsTight {
-		return "", r.unsupported(list)
+		return "", r.conversionError(list, "loose list items with multiple blocks are not supported")
 	}
-	marker := "*"
+	marker := parentMarkers + "*"
 	if list.IsOrdered() {
-		marker = "#"
+		marker = parentMarkers + "#"
 	}
-	marker = parentMarkers + marker
-	items := make([]string, 0, list.ChildCount())
+	lines := make([]string, 0, list.ChildCount())
 	for child := list.FirstChild(); child != nil; child = child.NextSibling() {
 		item, ok := child.(*ast.ListItem)
 		if !ok {
 			return "", r.unsupported(list)
+		}
+		var content string
+		var nestedStart ast.Node
+		switch firstBlock := item.FirstChild().(type) {
+		case *ast.TextBlock:
+			var err error
+			content, err = r.renderInlines(firstBlock, false)
+			if err != nil {
+				return "", err
+			}
+			nestedStart = firstBlock.NextSibling()
+		case *ast.List:
+			nestedStart = firstBlock
+		case nil:
+		default:
+			return "", r.conversionError(firstBlock, listItemBlockReason)
 		}
 		itemMarkup := marker
-		for itemChild := item.FirstChild(); itemChild != nil; itemChild = itemChild.NextSibling() {
-			switch typed := itemChild.(type) {
-			case *ast.TextBlock:
-				content, err := r.renderInlines(typed, false)
-				if err != nil {
-					return "", err
-				}
-				if content != "" {
-					itemMarkup += " " + content
-				}
-			case *ast.List:
-				nested, err := r.renderList(typed, marker)
-				if err != nil {
-					return "", err
-				}
-				itemMarkup += "\n" + nested
-			default:
-				return "", r.unsupported(itemChild)
-			}
+		if content != "" {
+			itemMarkup += " " + content
 		}
-		items = append(items, itemMarkup)
-	}
-	return strings.Join(items, "\n"), nil
-}
-
-func (r jiraMarkupRenderer) validateListItem(item *ast.ListItem) error {
-	hasParagraph := false
-	hasNestedList := false
-	for child := item.FirstChild(); child != nil; child = child.NextSibling() {
-		switch child.(type) {
-		case *ast.TextBlock, *ast.Paragraph:
-			if hasParagraph || hasNestedList {
-				return r.conversionError(child, "list items support one paragraph followed only by nested lists")
+		lines = append(lines, itemMarkup)
+		for block := nestedStart; block != nil; block = block.NextSibling() {
+			nestedList, ok := block.(*ast.List)
+			if !ok {
+				return "", r.conversionError(block, listItemBlockReason)
 			}
-			hasParagraph = true
-		case *ast.List:
-			hasNestedList = true
-		default:
-			return r.conversionError(child, "list items support one paragraph followed only by nested lists")
+			nestedMarkup, err := r.renderList(nestedList, marker)
+			if err != nil {
+				return "", err
+			}
+			lines = append(lines, nestedMarkup)
 		}
 	}
-	return nil
+	return strings.Join(lines, "\n"), nil
 }
 
 func (r jiraMarkupRenderer) renderInlines(parent ast.Node, atLineStart bool) (string, error) {
