@@ -4,6 +4,7 @@ package markup
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	extensionast "github.com/yuin/goldmark/extension/ast"
+	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
 )
@@ -53,13 +55,80 @@ func ToJira(input string, format InputFormat) (string, error) {
 	}
 
 	source := []byte(input)
-	parser := goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough))
-	document := parser.Parser().Parse(text.NewReader(source))
+	markdownParser := goldmark.New(
+		goldmark.WithExtensions(extension.Table, extension.Strikethrough),
+		goldmark.WithParserOptions(parser.WithBlockParsers(
+			util.Prioritized(newOrderedListInterruptParser(), 299),
+		)),
+	)
+	document := markdownParser.Parser().Parse(text.NewReader(source))
 	result, err := jiraMarkupRenderer{source: source}.renderDocument(document)
 	if err != nil {
 		return "", err
 	}
 	return result, nil
+}
+
+type orderedListInterruptParser struct {
+	parser.BlockParser
+}
+
+// Goldmark follows CommonMark's start-at-one restriction when an ordered list
+// interrupts a paragraph. Markdown Input deliberately accepts any authored
+// start value there because Jira Markup normalizes ordered markers to one.
+func newOrderedListInterruptParser() parser.BlockParser {
+	return &orderedListInterruptParser{BlockParser: parser.NewListParser()}
+}
+
+func (p *orderedListInterruptParser) Trigger() []byte {
+	return []byte{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'}
+}
+
+func (p *orderedListInterruptParser) Open(parent ast.Node, reader text.Reader, context parser.Context) (ast.Node, parser.State) {
+	last := context.LastOpenedBlock().Node
+	if !ast.IsParagraph(last) || last.Parent() != parent {
+		return nil, parser.NoChildren
+	}
+	line, _ := reader.PeekLine()
+	marker, start, ok := parseNonOneOrderedListItem(line)
+	if !ok {
+		return nil, parser.NoChildren
+	}
+	list := ast.NewList(marker)
+	list.Start = start
+	return list, parser.HasChildren
+}
+
+func parseNonOneOrderedListItem(line []byte) (byte, int, bool) {
+	index := 0
+	for index < len(line) && line[index] == ' ' {
+		index++
+	}
+	if index > 3 {
+		return 0, 0, false
+	}
+	numberStart := index
+	for index < len(line) && util.IsNumeric(line[index]) {
+		index++
+	}
+	if index == numberStart || index-numberStart > 9 || index >= len(line) ||
+		(line[index] != '.' && line[index] != ')') {
+		return 0, 0, false
+	}
+	marker := line[index]
+	start, err := strconv.Atoi(string(line[numberStart:index]))
+	if err != nil || start == 1 {
+		return 0, 0, false
+	}
+	index++
+	if index >= len(line) || line[index] == '\n' || util.IsBlank(line[index:]) {
+		return 0, 0, false
+	}
+	indent, _ := util.IndentWidth(line[index:], 0)
+	if indent == 0 {
+		return 0, 0, false
+	}
+	return marker, start, true
 }
 
 type jiraMarkupRenderer struct {
@@ -93,7 +162,9 @@ func (r jiraMarkupRenderer) renderBlock(node ast.Node) (string, error) {
 		}
 		return heading, nil
 	case *ast.List:
-		return r.renderSimpleList(typed)
+		return r.renderList(typed, "")
+	case *ast.Blockquote:
+		return r.renderBlockquote(typed)
 	case *ast.ThematicBreak:
 		return "----", nil
 	case *ast.HTMLBlock:
@@ -103,33 +174,78 @@ func (r jiraMarkupRenderer) renderBlock(node ast.Node) (string, error) {
 	}
 }
 
-func (r jiraMarkupRenderer) renderSimpleList(list *ast.List) (string, error) {
+func (r jiraMarkupRenderer) renderBlockquote(blockquote *ast.Blockquote) (string, error) {
+	if blockquote.ChildCount() == 0 {
+		return "", r.conversionError(blockquote, "blockquotes must contain at least one paragraph")
+	}
+	paragraphs := make([]string, 0, blockquote.ChildCount())
+	for child := blockquote.FirstChild(); child != nil; child = child.NextSibling() {
+		paragraph, ok := child.(*ast.Paragraph)
+		if !ok {
+			if _, nested := child.(*ast.Blockquote); nested {
+				return "", r.conversionError(child, "nested blockquotes are not supported")
+			}
+			return "", r.conversionError(child, "blockquotes support only paragraphs")
+		}
+		content, err := r.renderInlines(paragraph, true)
+		if err != nil {
+			return "", err
+		}
+		paragraphs = append(paragraphs, content)
+	}
+	return "{quote}\n" + strings.Join(paragraphs, "\n\n") + "\n{quote}", nil
+}
+
+func (r jiraMarkupRenderer) renderList(list *ast.List, parentMarkers string) (string, error) {
+	listItems := make([]*ast.ListItem, 0, list.ChildCount())
+	for child := list.FirstChild(); child != nil; child = child.NextSibling() {
+		item, ok := child.(*ast.ListItem)
+		if !ok || item.FirstChild() == nil {
+			return "", r.unsupported(list)
+		}
+		listItems = append(listItems, item)
+		first := item.FirstChild()
+		if _, textBlock := first.(*ast.TextBlock); !textBlock {
+			if _, paragraph := first.(*ast.Paragraph); !paragraph {
+				return "", r.conversionError(first, "list items support only text followed by nested lists")
+			}
+		}
+		for nested := first.NextSibling(); nested != nil; nested = nested.NextSibling() {
+			switch nested.(type) {
+			case *ast.List, *ast.Paragraph:
+			default:
+				return "", r.conversionError(nested, "list items support only text followed by nested lists")
+			}
+		}
+	}
 	if !list.IsTight {
-		return "", r.unsupported(list)
+		return "", r.conversionError(list, "loose lists are not supported")
 	}
 	marker := "*"
 	if list.IsOrdered() {
 		marker = "#"
 	}
-	items := make([]string, 0, list.ChildCount())
-	for child := list.FirstChild(); child != nil; child = child.NextSibling() {
-		item, ok := child.(*ast.ListItem)
-		if !ok || item.ChildCount() != 1 {
-			return "", r.unsupported(list)
-		}
-		textBlock, ok := item.FirstChild().(*ast.TextBlock)
-		if !ok {
-			return "", r.unsupported(list)
-		}
+	markers := parentMarkers + marker
+	items := make([]string, 0, len(listItems))
+	for _, item := range listItems {
+		textBlock := item.FirstChild().(*ast.TextBlock)
 		content, err := r.renderInlines(textBlock, false)
 		if err != nil {
 			return "", err
 		}
-		itemMarkup := marker
+		itemMarkup := markers
 		if content != "" {
 			itemMarkup += " " + content
 		}
 		items = append(items, itemMarkup)
+		for nested := textBlock.NextSibling(); nested != nil; nested = nested.NextSibling() {
+			nestedList := nested.(*ast.List)
+			nestedMarkup, err := r.renderList(nestedList, markers)
+			if err != nil {
+				return "", err
+			}
+			items = append(items, nestedMarkup)
+		}
 	}
 	return strings.Join(items, "\n"), nil
 }
@@ -261,12 +377,16 @@ func (r jiraMarkupRenderer) renderCodeSpan(code *ast.CodeSpan) (string, error) {
 }
 
 func (r jiraMarkupRenderer) unsupported(node ast.Node) *ConversionError {
+	return r.conversionError(node, "unsupported Markdown Input syntax")
+}
+
+func (r jiraMarkupRenderer) conversionError(node ast.Node, reason string) *ConversionError {
 	line, column := sourcePosition(r.source, node)
 	return &ConversionError{
 		Line:     line,
 		Column:   column,
 		NodeType: node.Kind().String(),
-		Reason:   "unsupported Markdown Input syntax",
+		Reason:   reason,
 	}
 }
 

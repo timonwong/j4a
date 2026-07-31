@@ -162,6 +162,7 @@ func TestCustomFieldAliasAndMarkdownCreate(t *testing.T) {
 
 func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing.T) {
 	clearCommandEnv(t)
+	const invalidMarkdown = "> outer\n>\n> > nested"
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		calls.Add(1)
@@ -177,19 +178,19 @@ func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing
 			name: "issue create",
 			args: []string{
 				"issues", "create", "--project", "OPS", "--type", "Story", "--summary", "Unsupported input",
-				"--description", "> quote", "--input-format=markdown", "--field", "story-points=5",
+				"--description", invalidMarkdown, "--input-format=markdown", "--field", "story-points=5",
 			},
 		},
 		{
 			name: "issue update",
 			args: []string{
-				"issues", "update", "OPS-1", "--description", "> quote", "--input-format=markdown",
+				"issues", "update", "OPS-1", "--description", invalidMarkdown, "--input-format=markdown",
 				"--field", "story-points=5",
 			},
 		},
 		{
 			name: "issue comment",
-			args: []string{"issues", "comment", "OPS-1", "--body", "> quote", "--input-format=markdown"},
+			args: []string{"issues", "comment", "OPS-1", "--body", invalidMarkdown, "--input-format=markdown"},
 		},
 	}
 	for _, test := range tests {
@@ -212,9 +213,9 @@ func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing
 				t.Fatal(err)
 			}
 			if envelope.SchemaVersion != "1" || envelope.Error.Kind != "invalid_input" ||
-				!strings.Contains(envelope.Error.Message, "line 1, column 1") ||
+				!strings.Contains(envelope.Error.Message, "line 3, column 3") ||
 				!strings.Contains(envelope.Error.Message, "Blockquote") ||
-				!strings.Contains(envelope.Error.Message, "unsupported Markdown Input syntax") {
+				!strings.Contains(envelope.Error.Message, "nested blockquotes are not supported") {
 				t.Fatalf("error envelope = %+v", envelope)
 			}
 		})
