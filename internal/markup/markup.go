@@ -10,7 +10,9 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
+	extensionast "github.com/yuin/goldmark/extension/ast"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 // InputFormat selects whether a text value is already Jira Markup or needs
@@ -79,9 +81,9 @@ func (r jiraMarkupRenderer) renderDocument(document ast.Node) (string, error) {
 func (r jiraMarkupRenderer) renderBlock(node ast.Node) (string, error) {
 	switch typed := node.(type) {
 	case *ast.Paragraph:
-		return r.renderInlines(typed)
+		return r.renderInlines(typed, true)
 	case *ast.Heading:
-		content, err := r.renderInlines(typed)
+		content, err := r.renderInlines(typed, false)
 		if err != nil {
 			return "", err
 		}
@@ -92,6 +94,10 @@ func (r jiraMarkupRenderer) renderBlock(node ast.Node) (string, error) {
 		return heading, nil
 	case *ast.List:
 		return r.renderSimpleList(typed)
+	case *ast.ThematicBreak:
+		return "----", nil
+	case *ast.HTMLBlock:
+		return escapeUserTextForJiraMarkup(r.htmlBlockSource(typed), true), nil
 	default:
 		return "", r.unsupported(node)
 	}
@@ -115,7 +121,7 @@ func (r jiraMarkupRenderer) renderSimpleList(list *ast.List) (string, error) {
 		if !ok {
 			return "", r.unsupported(list)
 		}
-		content, err := r.renderInlines(textBlock)
+		content, err := r.renderInlines(textBlock, false)
 		if err != nil {
 			return "", err
 		}
@@ -128,28 +134,112 @@ func (r jiraMarkupRenderer) renderSimpleList(list *ast.List) (string, error) {
 	return strings.Join(items, "\n"), nil
 }
 
-func (r jiraMarkupRenderer) renderInlines(parent ast.Node) (string, error) {
+func (r jiraMarkupRenderer) renderInlines(parent ast.Node, atLineStart bool) (string, error) {
 	var result strings.Builder
 	for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
-		switch typed := node.(type) {
-		case *ast.Text:
-			if typed.SoftLineBreak() || typed.HardLineBreak() {
-				return "", r.unsupported(typed)
-			}
-			result.Write(typed.Segment.Value(r.source))
-		case *ast.CodeSpan:
-			content, err := r.renderCodeSpan(typed)
-			if err != nil {
-				return "", err
-			}
-			result.WriteString("{{")
-			result.WriteString(content)
-			result.WriteString("}}")
-		default:
-			return "", r.unsupported(node)
+		content, err := r.renderInline(node, atLineStart)
+		if err != nil {
+			return "", err
+		}
+		result.WriteString(content)
+		if content != "" {
+			atLineStart = strings.HasSuffix(content, "\n")
 		}
 	}
 	return result.String(), nil
+}
+
+func (r jiraMarkupRenderer) renderInline(node ast.Node, atLineStart bool) (string, error) {
+	switch typed := node.(type) {
+	case *ast.Text:
+		value := typed.Segment.Value(r.source)
+		if !typed.IsRaw() {
+			value = util.UnescapePunctuations(value)
+			value = util.ResolveNumericReferences(value)
+			value = util.ResolveEntityNames(value)
+		}
+		content := escapeUserTextForJiraMarkup(value, atLineStart)
+		if typed.HardLineBreak() {
+			return content + "\\\\\n", nil
+		}
+		if typed.SoftLineBreak() {
+			return content + " ", nil
+		}
+		return content, nil
+	case *ast.CodeSpan:
+		content, err := r.renderCodeSpan(typed)
+		if err != nil {
+			return "", err
+		}
+		return "{{" + content + "}}", nil
+	case *ast.Emphasis:
+		delimiter := "_"
+		if typed.Level == 2 {
+			delimiter = "*"
+		}
+		return r.renderDelimitedInline(typed, delimiter)
+	case *extensionast.Strikethrough:
+		return r.renderDelimitedInline(typed, "-")
+	case *ast.RawHTML:
+		return escapeUserTextForJiraMarkup(typed.Segments.Value(r.source), atLineStart), nil
+	default:
+		return "", r.unsupported(node)
+	}
+}
+
+func (r jiraMarkupRenderer) htmlBlockSource(block *ast.HTMLBlock) []byte {
+	var result []byte
+	for index := range block.Lines().Len() {
+		segment := block.Lines().At(index)
+		result = append(result, segment.Value(r.source)...)
+	}
+	if block.HasClosure() {
+		result = append(result, block.ClosureLine.Value(r.source)...)
+	}
+	return bytes.TrimSpace(result)
+}
+
+func escapeUserTextForJiraMarkup(value []byte, atLineStart bool) string {
+	var result strings.Builder
+	remaining := string(value)
+	for remaining != "" {
+		if atLineStart {
+			if prefixLength := jiraLineControlPrefixLength(remaining); prefixLength != 0 {
+				result.WriteString(remaining[:prefixLength-1])
+				result.WriteString(`\.`)
+				remaining = remaining[prefixLength:]
+				atLineStart = false
+				continue
+			}
+		}
+		character, size := utf8.DecodeRuneInString(remaining)
+		if strings.ContainsRune(`\{}[]!*?_-+^~|#`, character) {
+			result.WriteByte('\\')
+		}
+		result.WriteRune(character)
+		remaining = remaining[size:]
+		atLineStart = character == '\n'
+	}
+	return result.String()
+}
+
+func jiraLineControlPrefixLength(value string) int {
+	if len(value) >= 3 && value[0] == 'h' && value[1] >= '1' && value[1] <= '6' && value[2] == '.' &&
+		(len(value) == 3 || value[3] == ' ') {
+		return 3
+	}
+	if strings.HasPrefix(value, "bq.") && (len(value) == 3 || value[3] == ' ') {
+		return 3
+	}
+	return 0
+}
+
+func (r jiraMarkupRenderer) renderDelimitedInline(node ast.Node, delimiter string) (string, error) {
+	content, err := r.renderInlines(node, false)
+	if err != nil {
+		return "", err
+	}
+	return delimiter + content + delimiter, nil
 }
 
 func (r jiraMarkupRenderer) renderCodeSpan(code *ast.CodeSpan) (string, error) {
