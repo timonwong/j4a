@@ -49,7 +49,7 @@ Jira's wiki-style text notation accepted directly by Jira Data Center and Server
 _Avoid_: Jira Markdown, wiki Markdown
 
 **Markdown Input**:
-CommonMark-compatible text that jiro converts to Jira Markup only when explicitly requested.
+CommonMark-based text with table and strikethrough extensions that jiro converts to Jira Markup only when explicitly requested. It has no task-list, bare-autolink, malformed-input-repair, or embedded Jira Markup semantics.
 _Avoid_: Jira Markup
 
 **Sprint**:
