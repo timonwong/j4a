@@ -468,6 +468,158 @@ func TestToJiraRendersInlineFormattingInASTNestingOrder(t *testing.T) {
 	assertMarkdownConversions(t, tests)
 }
 
+func TestToJiraRendersExplicitLinkWithFormattedLabel(t *testing.T) {
+	t.Parallel()
+	got, err := ToJira(`[**Docs**](https://example.com "ignored title")`, Markdown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `[*Docs*|https://example.com]`; got != want {
+		t.Fatalf("ToJira() = %q, want %q", got, want)
+	}
+}
+
+func TestToJiraRendersOnlyIntentionalCommonMarkLinks(t *testing.T) {
+	t.Parallel()
+	assertMarkdownConversions(t, []markdownConversionCase{
+		{name: "angle-bracket URL", input: `<https://example.com/docs>`, want: `[https://example.com/docs|https://example.com/docs]`},
+		{name: "angle-bracket email", input: `<user@example.com>`, want: `[user@example.com|mailto:user@example.com]`},
+		{name: "reference link", input: "[Docs][guide]\n\n[guide]: ../guide/start \"ignored title\"", want: `[Docs|../guide/start]`},
+		{name: "bare URL and email remain text", input: `https://example.com user@example.com`, want: `https://example.com user@example.com`},
+	})
+}
+
+func TestToJiraPreservesSafeLinkDestinations(t *testing.T) {
+	t.Parallel()
+	assertMarkdownConversions(t, []markdownConversionCase{
+		{name: "absolute", input: `[docs](https://example.com/a?x=1#top)`, want: `[docs|https://example.com/a?x=1#top]`},
+		{name: "root relative", input: `[docs](/guide/start)`, want: `[docs|/guide/start]`},
+		{name: "path relative", input: `[docs](../guide/start)`, want: `[docs|../guide/start]`},
+		{name: "protocol relative", input: `[cdn](//cdn.example.com/asset)`, want: `[cdn|//cdn.example.com/asset]`},
+		{name: "custom scheme", input: `[issue](jira:PROJ-1)`, want: `[issue|jira:PROJ-1]`},
+		{name: "CommonMark escapes and entities are decoded", input: `[custom](custom+v1:thing\(1\)?x=1&amp;y=2)`, want: `[custom|custom+v1:thing(1)?x=1&y=2]`},
+	})
+}
+
+func TestToJiraRejectsDangerousLinkDestinationSchemesWithoutPartialOutput(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		input    string
+		scheme   string
+		nodeType string
+	}{
+		{name: "mixed-case javascript", input: "safe\n\n[bad](JaVaScRiPt:alert(1))", scheme: "javascript", nodeType: "Link"},
+		{name: "entity-normalized vbscript", input: `[bad](vb&#x73;cript:msgbox)`, scheme: "vbscript", nodeType: "Link"},
+		{name: "uppercase data", input: `[bad](DATA:text/plain,unsafe)`, scheme: "data", nodeType: "Link"},
+		{name: "angle-bracket dangerous URL", input: `<JaVaScRiPt:alert>`, scheme: "javascript", nodeType: "AutoLink"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			line := 1
+			if strings.HasPrefix(test.input, "safe") {
+				line = 3
+			}
+			assertMarkdownConversionError(t, test.input, ConversionError{
+				Line:     line,
+				Column:   1,
+				NodeType: test.nodeType,
+				Reason:   fmt.Sprintf("dangerous destination scheme %q is not allowed", test.scheme),
+			})
+		})
+	}
+}
+
+func TestToJiraRejectsLinkDestinationsContainingControlCharacters(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		input    string
+		line     int
+		nodeType string
+		reason   string
+	}{
+		{name: "explicit link", input: "safe\n\n[bad](<https://example.com/a\x01b>)", line: 3, nodeType: "Link", reason: "destination contains control character U+0001"},
+		{name: "angle-bracket link", input: "<https://example.com/a\x7fb>", line: 1, nodeType: "AutoLink", reason: "destination contains control character U+007F"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assertMarkdownConversionError(t, test.input, ConversionError{
+				Line:     test.line,
+				Column:   1,
+				NodeType: test.nodeType,
+				Reason:   test.reason,
+			})
+		})
+	}
+}
+
+func TestToJiraRendersImagesWithDestinationAndOptionalAltAttribute(t *testing.T) {
+	t.Parallel()
+	assertMarkdownConversions(t, []markdownConversionCase{
+		{
+			name:  "non-empty alternative text is separate from the target",
+			input: `![architecture](https://example.com/diagram.png "ignored title")`,
+			want:  `!https://example.com/diagram.png|alt=architecture!`,
+		},
+		{
+			name:  "empty alternative text omits the attribute",
+			input: `![](images/diagram.png "ignored title")`,
+			want:  `!images/diagram.png!`,
+		},
+		{
+			name:  "reference image with protocol-relative destination",
+			input: "![architecture][diagram]\n\n[diagram]: //cdn.example.com/diagram.png \"ignored title\"",
+			want:  `!//cdn.example.com/diagram.png|alt=architecture!`,
+		},
+		{
+			name:  "custom-scheme image",
+			input: `![chart](asset+v1:diagram-42)`,
+			want:  `!asset+v1:diagram-42|alt=chart!`,
+		},
+	})
+}
+
+func TestToJiraRejectsUnsafeImageDestinationsWithoutPartialOutput(t *testing.T) {
+	t.Parallel()
+	t.Run("dangerous scheme", func(t *testing.T) {
+		t.Parallel()
+		assertMarkdownConversionError(t, "safe\n\n![bad](DaTa:text/plain,unsafe)", ConversionError{
+			Line:     3,
+			Column:   1,
+			NodeType: "Image",
+			Reason:   `dangerous destination scheme "data" is not allowed`,
+		})
+	})
+	t.Run("control character", func(t *testing.T) {
+		t.Parallel()
+		assertMarkdownConversionError(t, "![bad](<images/a\x7fb.png>)", ConversionError{
+			Line:     1,
+			Column:   1,
+			NodeType: "Image",
+			Reason:   "destination contains control character U+007F",
+		})
+	})
+}
+
+func TestToJiraEscapesLinksAndImagesInTheirOwnOutputContexts(t *testing.T) {
+	t.Parallel()
+	assertMarkdownConversions(t, []markdownConversionCase{
+		{
+			name:  "link label and destination have separate delimiters",
+			input: `[**label** | value!](<custom:one|two]!>)`,
+			want:  `[*label* \| value\!|custom:one\|two\]!]`,
+		},
+		{
+			name:  "image destination and alt attribute remain isolated",
+			input: `![**architecture** | v1, x=y!](<images/a,b=c|d!e.png>)`,
+			want:  `!images/a,b=c\|d\!e.png|alt=architecture \| v1\, x\=y\!!`,
+		},
+	})
+}
+
 func TestToJiraSerializesInlineBreaks(t *testing.T) {
 	t.Parallel()
 	tests := []markdownConversionCase{
