@@ -2,7 +2,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/url"
@@ -34,7 +33,6 @@ type app struct {
 	username   string
 	authType   string
 	output     string
-	raw        bool
 	quiet      bool
 }
 
@@ -89,15 +87,14 @@ func (a *app) rootCommand() *cobra.Command {
 	flags.StringVar(&a.username, "username", "", "Jira username for Basic Auth")
 	flags.StringVar(&a.authType, "auth-type", "", "authentication type: basic or pat")
 	flags.StringVarP(&a.output, "output", "o", "text", "output format: text or json")
-	flags.BoolVar(&a.raw, "raw", false, "emit the unmodified Jira REST response")
 	flags.BoolVar(&a.quiet, "quiet", false, "suppress successful text output")
 
 	root.AddCommand(
 		a.authCommand(),
 		a.cacheCommand(),
-		a.issuesCommand(),
-		a.projectsCommand(),
-		a.fieldsCommand(),
+		a.issueCommand(),
+		a.projectCommand(),
+		a.fieldCommand(),
 		a.searchCommand(),
 		a.schemaCommand(),
 	)
@@ -106,17 +103,7 @@ func (a *app) rootCommand() *cobra.Command {
 }
 
 func (a *app) renderer() (output.Renderer, error) {
-	if a.output == "raw" && !a.raw {
-		return output.Renderer{}, apperr.New(apperr.KindInvalidInput, "use --raw instead of --output=raw")
-	}
-	formatValue := a.output
-	if a.raw {
-		if formatValue != "" && formatValue != "text" && formatValue != "raw" {
-			return output.Renderer{}, apperr.New(apperr.KindInvalidInput, "--raw conflicts with --output")
-		}
-		formatValue = "raw"
-	}
-	format, err := output.ParseFormat(formatValue)
+	format, err := output.ParseFormat(a.output)
 	if err != nil {
 		return output.Renderer{}, err
 	}
@@ -221,23 +208,6 @@ func (a *app) renderPartial(data, text any) error {
 		return renderer.Success(text)
 	}
 	return renderer.Success(data)
-}
-
-func (a *app) rawRequest(ctx context.Context, client *jira.Client, method, path string, query url.Values, input any) error {
-	renderer, err := a.renderer()
-	if err != nil {
-		return err
-	}
-	raw, err := client.RawRequest(ctx, method, path, query, input)
-	if err != nil {
-		return err
-	}
-	return renderer.Raw(raw)
-}
-
-func isRaw(a *app) bool {
-	renderer, err := a.renderer()
-	return err == nil && renderer.Format == output.FormatRaw
 }
 
 func exactArgs(count int) cobra.PositionalArgs {

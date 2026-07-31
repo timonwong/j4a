@@ -41,7 +41,7 @@ func TestDirectCustomFieldIDBypassesMetadata(t *testing.T) {
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := newFieldCacheTestApp(stdout, stderr, fieldcache.New(t.TempDir(), nil))
 	code := a.execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "add",
 		"--project", "OPS", "--type", "Task", "--summary", "Direct", "--field", "customfield_10006=5",
 	})
 	if code != 0 || stderr.Len() != 0 || myselfCalls.Load() != 0 || fieldCalls.Load() != 0 {
@@ -73,7 +73,7 @@ func TestFreshCustomFieldCacheAvoidsFieldLookup(t *testing.T) {
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := newFieldCacheTestApp(stdout, stderr, store)
 	code := a.execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "add",
 		"--project", "OPS", "--type", "Task", "--summary", "Cached", "--field", "story-points=5",
 	})
 	if code != 0 || stderr.Len() != 0 || fieldCalls.Load() != 0 {
@@ -108,7 +108,7 @@ func TestStaleCustomFieldCacheAllowsMutationWithWarning(t *testing.T) {
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := newFieldCacheTestApp(stdout, stderr, store)
 	code := a.execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "add",
 		"--project", "OPS", "--type", "Task", "--summary", "Stale", "--field", "story-points=5",
 	})
 	if code != 0 || stderr.Len() != 0 || fieldCalls.Load() != 1 || issueCalls.Load() != 1 {
@@ -149,7 +149,7 @@ func TestAliasMissForcesOneLiveRefresh(t *testing.T) {
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := newFieldCacheTestApp(stdout, stderr, store)
 	code := a.execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "add",
 		"--project", "OPS", "--type", "Task", "--summary", "Refresh", "--field", "story-points=5",
 	})
 	if code != 0 || stderr.Len() != 0 || fieldCalls.Load() != 1 {
@@ -189,7 +189,7 @@ func TestInvalidCustomFieldCacheDoesNotFallback(t *testing.T) {
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := newFieldCacheTestApp(stdout, stderr, store)
 	code := a.execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "add",
 		"--project", "OPS", "--type", "Task", "--summary", "Invalid", "--field", "story-points=5",
 	})
 	if code != 5 || stdout.Len() != 0 || issueCalls.Load() != 0 || !strings.Contains(stderr.String(), "metadata unavailable") {
@@ -221,7 +221,7 @@ func TestImplicitCacheWriteFailureUsesLiveMetadataWithWarning(t *testing.T) {
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := newFieldCacheTestApp(stdout, stderr, store)
 	code := a.execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "add",
 		"--project", "OPS", "--type", "Task", "--summary", "Live", "--field", "story-points=5",
 	})
 	if code != 0 || stderr.Len() != 0 {
@@ -260,7 +260,7 @@ func TestCacheFieldsRefreshAndFieldListSources(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := newFieldCacheTestApp(stdout, stderr, store)
-	code := a.execute([]string{"--config", configPath, "-ojson", "cache", "fields", "refresh"})
+	code := a.execute([]string{"--config", configPath, "-ojson", "cache", "refresh"})
 	if code != 0 || stderr.Len() != 0 || myselfCalls.Load() != 1 || fieldCalls.Load() != 1 {
 		t.Fatalf("refresh code=%d myself=%d fields=%d stdout=%s stderr=%s", code, myselfCalls.Load(), fieldCalls.Load(), stdout.String(), stderr.String())
 	}
@@ -271,28 +271,28 @@ func TestCacheFieldsRefreshAndFieldListSources(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = a.execute([]string{"--config", configPath, "-ojson", "fields", "list", "--custom"})
+	code = a.execute([]string{"--config", configPath, "-ojson", "field", "list", "--custom"})
 	if code != 0 || stderr.Len() != 0 || myselfCalls.Load() != 2 || fieldCalls.Load() != 1 {
 		t.Fatalf("custom list code=%d myself=%d fields=%d stdout=%s stderr=%s", code, myselfCalls.Load(), fieldCalls.Load(), stdout.String(), stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	code = a.execute([]string{"--config", configPath, "-ojson", "fields", "list"})
+	code = a.execute([]string{"--config", configPath, "-ojson", "field", "list"})
 	if code != 0 || stderr.Len() != 0 || myselfCalls.Load() != 2 || fieldCalls.Load() != 2 {
 		t.Fatalf("full list code=%d myself=%d fields=%d stdout=%s stderr=%s", code, myselfCalls.Load(), fieldCalls.Load(), stdout.String(), stderr.String())
 	}
 }
 
-func TestCacheFieldsRefreshRejectsRawBeforeNetwork(t *testing.T) {
+func TestRemovedRawFlagFailsBeforeNetwork(t *testing.T) {
 	clearCommandEnv(t)
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	defer server.Close()
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := newFieldCacheTestApp(stdout, stderr, fieldcache.New(t.TempDir(), nil))
-	code := a.execute([]string{"--config", writeCLIConfig(t, server.URL, false), "--raw", "cache", "fields", "refresh"})
-	if code != 2 || calls.Load() != 0 || !strings.Contains(stderr.String(), "--raw") {
+	code := a.execute([]string{"--config", writeCLIConfig(t, server.URL, false), "cache", "refresh", "--raw"})
+	if code != 2 || calls.Load() != 0 || !strings.Contains(stderr.String(), "invalid command flags") {
 		t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls.Load(), stdout.String(), stderr.String())
 	}
 }

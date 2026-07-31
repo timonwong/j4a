@@ -17,7 +17,6 @@ type Format string
 const (
 	FormatText Format = "text"
 	FormatJSON Format = "json"
-	FormatRaw  Format = "raw"
 
 	// SchemaVersion identifies the stable, public JSON envelope version.
 	SchemaVersion = "1"
@@ -29,8 +28,8 @@ func ParseFormat(value string) (Format, error) {
 		return FormatText, nil
 	}
 	format := Format(strings.ToLower(value))
-	if format != FormatText && format != FormatJSON && format != FormatRaw {
-		return "", apperr.New(apperr.KindInvalidInput, "output must be text, json, or raw")
+	if format != FormatText && format != FormatJSON {
+		return "", apperr.New(apperr.KindInvalidInput, "output must be text or json")
 	}
 	return format, nil
 }
@@ -68,7 +67,7 @@ func New(stdout, stderr io.Writer, format Format, quiet bool) Renderer {
 }
 
 // WithWarnings returns a copy of r that includes warnings with its successful
-// output. Warnings are emitted in JSON and text modes; raw output is unchanged.
+// output. Warnings are emitted in JSON and text modes.
 func (r Renderer) WithWarnings(warnings ...Warning) Renderer {
 	r.warnings = append([]Warning(nil), warnings...)
 	return r
@@ -97,8 +96,6 @@ func (r Renderer) Success(data any) error {
 	switch r.Format {
 	case FormatJSON:
 		return writeJSON(r.Stdout, successEnvelope{SchemaVersion: SchemaVersion, Data: data, Warnings: r.warnings})
-	case FormatRaw:
-		return r.Raw(data)
 	case FormatText, "":
 		for _, warning := range r.warnings {
 			if _, err := fmt.Fprintf(r.Stderr, "warning: %s\n", warning.Message); err != nil {
@@ -127,27 +124,7 @@ func (r Renderer) Success(data any) error {
 			return err
 		}
 	default:
-		return apperr.New(apperr.KindInvalidInput, "output must be text, json, or raw")
-	}
-}
-
-// Raw writes an unmodified Jira response. It is only valid for raw output.
-func (r Renderer) Raw(data any) error {
-	if r.Format != FormatRaw {
-		return apperr.New(apperr.KindInvalidInput, "raw output requires format raw")
-	}
-	switch value := data.(type) {
-	case []byte:
-		_, err := r.Stdout.Write(value)
-		return err
-	case json.RawMessage:
-		_, err := r.Stdout.Write(value)
-		return err
-	case string:
-		_, err := io.WriteString(r.Stdout, value)
-		return err
-	default:
-		return apperr.New(apperr.KindInvalidInput, "raw output requires bytes, string, or json.RawMessage")
+		return apperr.New(apperr.KindInvalidInput, "output must be text or json")
 	}
 }
 

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"github.com/timonwong/jiro/internal/apperr"
 	"github.com/timonwong/jiro/internal/output"
 )
 
@@ -37,16 +36,14 @@ type flagSchema struct {
 }
 
 type outputSchema struct {
-	Default         string `json:"default"`
-	JSONEnvelope    string `json:"jsonEnvelope"`
-	ErrorEnvelope   string `json:"errorEnvelope"`
-	SuccessStream   string `json:"successStream"`
-	ErrorStream     string `json:"errorStream"`
-	Raw             string `json:"raw"`
-	RawRestrictions string `json:"rawRestrictions"`
-	PartialFailure  string `json:"partialFailure"`
-	SchemaVersion   string `json:"schemaVersion"`
-	Warnings        string `json:"warnings"`
+	Default        string `json:"default"`
+	JSONEnvelope   string `json:"jsonEnvelope"`
+	ErrorEnvelope  string `json:"errorEnvelope"`
+	SuccessStream  string `json:"successStream"`
+	ErrorStream    string `json:"errorStream"`
+	PartialFailure string `json:"partialFailure"`
+	SchemaVersion  string `json:"schemaVersion"`
+	Warnings       string `json:"warnings"`
 }
 
 func (a *app) schemaCommand() *cobra.Command {
@@ -55,9 +52,6 @@ func (a *app) schemaCommand() *cobra.Command {
 		Short: "Describe jiro's machine-readable CLI contract",
 		Args:  exactArgs(0),
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if a.raw {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for schema")
-			}
 			renderer := output.New(a.stdout, a.stderr, output.FormatJSON, false)
 			return renderer.Success(schemaDocument())
 		},
@@ -66,21 +60,21 @@ func (a *app) schemaCommand() *cobra.Command {
 
 func schemaDocument() cliSchema {
 	return cliSchema{
-		ContractVersion: "4",
+		ContractVersion: "3",
 		Program:         "jiro",
 		Platform:        "Jira Data Center/Server REST API v2",
 		GlobalFlags: []flagSchema{
 			flag("config", "c", "path"), flag("profile", "", "string"), flag("host", "", "url"),
 			flag("username", "", "string"), flag("auth-type", "", "enum:basic|pat"),
-			flagDefault("output", "o", "enum:text|json", "text"), flag("raw", "", "boolean"),
+			flagDefault("output", "o", "enum:text|json", "text"),
 			flag("quiet", "", "boolean"),
 		},
 		Commands: []commandSchema{
-			commandWithFlags("cache fields refresh", []string{"cache field refresh"}, true, "", nil, object("refreshed", "path", "fieldCount", "fetchedAt", "expiresAt", "instance", "principal")),
+			commandWithFlags("cache refresh", nil, true, "", nil, object("refreshed", "path", "fieldCount", "fetchedAt", "expiresAt", "instance", "principal")),
 			{Name: "auth login", Auth: false, Mutating: true, Flags: []flagSchema{flagDefault("use-keyring", "", "boolean", true)}, JSONData: object("profile", "host", "authType", "credentialStore", "user")},
 			{Name: "auth logout", Auth: false, Mutating: true, JSONData: object("profile", "credentialStore", "credentialRemoved", "environmentCredentialActive")},
 			{Name: "auth status", Auth: true, Mutating: false, JSONData: object("profile", "instance", "authType", "user")},
-			commandWithFlags("issues list", []string{"issue list"}, false, "", []flagSchema{
+			commandWithFlags("issue list", nil, false, "", []flagSchema{
 				flag("project", "p", "string"), flag("status", "", "string"), flag("assignee", "", "string"),
 				flag("type", "t", "string"), flag("resolution", "", "string"), flag("reporter", "", "string"),
 				repeatableFlag("label", "", "string"), repeatableFlag("component", "", "string"), repeatableFlag("fix-version", "", "string"),
@@ -88,64 +82,61 @@ func schemaDocument() cliSchema {
 				flag("jql", "q", "string"), flagDefault("limit", "n", "integer", 50),
 				flagDefault("offset", "", "integer", 0), flag("all", "", "boolean"), flag("fields", "", "string-list"),
 			}, object("startAt", "maxResults", "total", "issues")),
-			commandWithFlags("issues show", []string{"issue show"}, false, "ISSUE-KEY", []flagSchema{flag("fields", "", "string-list")}, object("id", "key", "summary", "description", "status", "fields")),
-			commandWithFlags("issues create", []string{"issue create"}, true, "", []flagSchema{
+			commandWithFlags("issue show", nil, false, "ISSUE-KEY", []flagSchema{flag("fields", "", "string-list")}, object("id", "key", "summary", "description", "status", "fields")),
+			commandWithFlags("issue add", nil, true, "", []flagSchema{
 				requiredFlag("project", "p", "string"), requiredFlag("type", "t", "string"), requiredFlag("summary", "s", "string"),
 				flag("description", "", "string"), flag("description-file", "", "path-or-stdin"), flagDefault("input-format", "", "enum:jira|markdown", "jira"),
 				flag("priority", "", "string"), flag("assignee", "", "string"), repeatableFlag("label", "", "string"), flag("parent", "", "issue-key"),
 				repeatableFlag("component", "", "string"), repeatableFlag("fix-version", "", "string"), flag("sprint", "", "string"), repeatableFlag("field", "", "key=value"),
 			}, object("id", "key", "sprint", "sprintMoved")),
-			commandWithFlags("issues update", []string{"issue update"}, true, "ISSUE-KEY", []flagSchema{
+			commandWithFlags("issue update", nil, true, "ISSUE-KEY", []flagSchema{
 				flag("summary", "s", "string"), flag("description", "", "string"), flag("description-file", "", "path-or-stdin"),
 				flagDefault("input-format", "", "enum:jira|markdown", "jira"), flag("priority", "", "string"), flag("assignee", "", "string"),
-				repeatableFlag("label", "", "string"), repeatableFlag("component", "", "string"), repeatableFlag("fix-version", "", "string"), repeatableFlag("field", "", "key=value"),
-			}, object("key", "updated")),
-			commandWithFlags("issues comments", []string{"issue comments"}, false, "ISSUE-KEY", []flagSchema{
+				repeatableFlag("label", "", "string"), repeatableFlag("component", "", "string"), repeatableFlag("fix-version", "", "string"), flag("sprint", "", "string"), repeatableFlag("field", "", "key=value"),
+			}, object("key", "updated", "sprint", "sprintMoved")),
+			commandWithFlags("issue comment list", nil, false, "ISSUE-KEY", []flagSchema{
 				flagDefault("limit", "n", "integer", 50), flagDefault("offset", "", "integer", 0),
 			}, object("issueKey", "comments")),
-			commandWithFlags("issues comment", []string{"issue comment"}, true, "ISSUE-KEY", []flagSchema{
+			commandWithFlags("issue comment add", nil, true, "ISSUE-KEY", []flagSchema{
 				flag("body", "", "string"), flag("body-file", "", "path-or-stdin"), flagDefault("input-format", "", "enum:jira|markdown", "jira"),
 			}, object("id", "body", "author", "created")),
-			command("issues list-transitions", false, "ISSUE-KEY", object("issueKey", "transitions")),
-			commandWithFlags("issues transition", []string{"issue transition"}, true, "ISSUE-KEY", []flagSchema{
+			command("issue list-transitions", false, "ISSUE-KEY", object("issueKey", "transitions")),
+			commandWithFlags("issue move", nil, true, "ISSUE-KEY", []flagSchema{
 				requiredFlag("to", "", "string"), repeatableFlag("field", "", "key=value"),
 			}, object("key", "transition", "transitioned")),
-			commandWithFlags("issues move", []string{"issue move"}, true, "ISSUE-KEY", []flagSchema{
-				requiredFlag("sprint", "", "string"),
-			}, object("key", "sprint", "moved")),
-			commandWithFlags("issues assign", []string{"issue assign"}, true, "ISSUE-KEY", []flagSchema{
+			commandWithFlags("issue assign", nil, true, "ISSUE-KEY", []flagSchema{
 				requiredFlag("assignee", "", "string"),
 			}, object("key", "assignee", "assigned")),
-			command("issues links", false, "ISSUE-KEY", object("issueKey", "links")),
-			commandWithFlags("issues link", []string{"issue link"}, true, "FROM", []flagSchema{
+			command("issue link list", false, "ISSUE-KEY", object("issueKey", "links")),
+			commandWithFlags("issue link add", nil, true, "FROM", []flagSchema{
 				requiredFlag("to", "", "issue-key"), requiredFlag("type", "", "string"),
 			}, object("from", "to", "type", "linked")),
-			command("issues unlink", true, "LINK-ID", object("linkId", "unlinked")),
-			command("issues link-types", false, "", object("linkTypes")),
-			commandWithFlags("issues bulk-transition", []string{"issue bulk-transition"}, true, "", []flagSchema{
+			command("issue link delete", true, "LINK-ID", object("linkId", "unlinked")),
+			command("issue link types", false, "", object("linkTypes")),
+			commandWithFlags("issue bulk move", nil, true, "", []flagSchema{
 				requiredFlag("jql", "", "string"), requiredFlag("to", "", "string"), repeatableFlag("field", "", "key=value"), flag("dry-run", "", "boolean"), flag("yes", "", "boolean"),
 			}, batchObject()),
-			commandWithFlags("issues bulk-assign", []string{"issue bulk-assign"}, true, "", []flagSchema{
+			commandWithFlags("issue bulk assign", nil, true, "", []flagSchema{
 				requiredFlag("jql", "", "string"), requiredFlag("assignee", "", "string"), flag("dry-run", "", "boolean"), flag("yes", "", "boolean"),
 			}, batchObject()),
 			commandWithFlags("search", nil, false, "JQL", []flagSchema{
 				flagDefault("limit", "n", "integer", 50), flagDefault("offset", "", "integer", 0), flag("all", "", "boolean"), flag("fields", "", "string-list"),
 			}, object("startAt", "maxResults", "total", "issues")),
-			commandWithFlags("projects list", []string{"project list"}, false, "", []flagSchema{
+			commandWithFlags("project list", nil, false, "", []flagSchema{
 				flagDefault("limit", "n", "integer", 50), flagDefault("offset", "", "integer", 0),
 			}, object("projects")),
-			commandWithFlags("projects show", []string{"project show"}, false, "PROJECT-KEY", nil, object("id", "key", "name", "description", "projectType", "lead")),
-			commandWithFlags("fields list", []string{"field list"}, false, "", []flagSchema{flag("custom", "", "boolean")}, object("fields")),
+			commandWithFlags("project show", nil, false, "PROJECT-KEY", nil, object("id", "key", "name", "description", "projectType", "lead")),
+			commandWithFlags("field list", nil, false, "", []flagSchema{flag("custom", "", "boolean")}, object("fields")),
 			{Name: "schema", Auth: false, Mutating: false, JSONData: object("contractVersion", "program", "platform", "globalFlags", "commands", "types", "output", "exitCodes")},
 		},
 		Types: typeDefinitions(),
 		Output: outputSchema{
 			Default: "text", JSONEnvelope: `{"schemaVersion":"1","data":...,"warnings":[...]?}`,
-			ErrorEnvelope: `{"schemaVersion":"1","error":{"kind":...,"message":...}}`,
-			SuccessStream: "stdout", ErrorStream: "stderr", Raw: "unmodified Jira REST response",
-			RawRestrictions: "--raw is unavailable for auth login, auth logout, auth status, issues create --sprint, issues bulk-transition, and issues bulk-assign; supported single-request issue actions keep their raw REST response behavior",
-			PartialFailure:  "on partial_failure, complete normalized result data is written to stdout before the structured error is written to stderr; exit code 7",
-			SchemaVersion:   output.SchemaVersion, Warnings: "non-fatal success conditions; JSON envelope or text stderr",
+			ErrorEnvelope:  `{"schemaVersion":"1","error":{"kind":...,"message":...}}`,
+			SuccessStream:  "stdout",
+			ErrorStream:    "stderr",
+			PartialFailure: "on partial_failure, complete normalized result data is written to stdout before the structured error is written to stderr; exit code 7",
+			SchemaVersion:  output.SchemaVersion, Warnings: "non-fatal success conditions; JSON envelope or text stderr",
 		},
 		ExitCodes: map[string]string{
 			"0": "success", "1": "unexpected error", "2": "invalid input or config", "3": "authentication failed",

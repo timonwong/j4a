@@ -155,7 +155,7 @@ func TestCustomFieldAliasAndMarkdownCreate(t *testing.T) {
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	a := &app{stdin: strings.NewReader(""), stdout: stdout, stderr: stderr, fieldStore: fieldcache.New(t.TempDir(), nil)}
 	code := a.execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "add",
 		"--project", "OPS", "--type", "Story", "--summary", "Structured output",
 		"--description", "# Header", "--input-format=markdown", "--field", "story-points=5",
 	})
@@ -197,20 +197,20 @@ func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing
 		{
 			name: "issue create",
 			args: []string{
-				"issues", "create", "--project", "OPS", "--type", "Story", "--summary", "Unsupported input",
+				"issue", "add", "--project", "OPS", "--type", "Story", "--summary", "Unsupported input",
 				"--description", unsupportedTableCell, "--input-format=markdown", "--field", "story-points=5",
 			},
 		},
 		{
 			name: "issue update",
 			args: []string{
-				"issues", "update", "OPS-1", "--description", unsupportedTableCell, "--input-format=markdown",
+				"issue", "update", "OPS-1", "--description", unsupportedTableCell, "--input-format=markdown",
 				"--field", "story-points=5",
 			},
 		},
 		{
 			name: "issue comment",
-			args: []string{"issues", "comment", "OPS-1", "--body", unsupportedTableCell, "--input-format=markdown"},
+			args: []string{"issue", "comment", "add", "OPS-1", "--body", unsupportedTableCell, "--input-format=markdown"},
 		},
 	}
 	for _, test := range tests {
@@ -243,7 +243,7 @@ func TestReadOnlyBlocksMutationAndInputConflict(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, true), "-ojson", "issues", "comment", "OPS-1", "--body", "blocked",
+		"--config", writeCLIConfig(t, server.URL, true), "-ojson", "issue", "comment", "add", "OPS-1", "--body", "blocked",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 2 || calls.Load() != 0 {
 		t.Fatalf("read-only code=%d calls=%d stdout=%s stderr=%s", code, calls.Load(), stdout.String(), stderr.String())
@@ -252,7 +252,7 @@ func TestReadOnlyBlocksMutationAndInputConflict(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	code = Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "comment", "OPS-1",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "comment", "add", "OPS-1",
 		"--body", "inline", "--body-file", "-",
 	}, strings.NewReader("file"), stdout, stderr)
 	if code != 2 || calls.Load() != 0 {
@@ -267,28 +267,16 @@ func TestReadOnlyBlocksBeforeCredentialResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"--config", path, "-ojson", "issues", "comment", "OPS-1", "--body", "blocked"}, strings.NewReader(""), stdout, stderr)
+	code := Execute([]string{"--config", path, "-ojson", "issue", "comment", "add", "OPS-1", "--body", "blocked"}, strings.NewReader(""), stdout, stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "read_only") {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 }
 
-func TestRawAndSchema(t *testing.T) {
+func TestSchema(t *testing.T) {
 	clearCommandEnv(t)
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(writer, `{"raw":true}`)
-	}))
-	defer server.Close()
-
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "--raw", "issues", "show", "OPS-1"}, strings.NewReader(""), stdout, stderr)
-	if code != 0 || stdout.String() != `{"raw":true}` || stderr.Len() != 0 {
-		t.Fatalf("raw code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	code = Execute([]string{"schema"}, strings.NewReader(""), stdout, stderr)
+	code := Execute([]string{"schema"}, strings.NewReader(""), stdout, stderr)
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("schema code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -297,14 +285,14 @@ func TestRawAndSchema(t *testing.T) {
 		Data          struct {
 			ContractVersion string `json:"contractVersion"`
 			Output          struct {
-				SchemaVersion   string `json:"schemaVersion"`
-				PartialFailure  string `json:"partialFailure"`
-				RawRestrictions string `json:"rawRestrictions"`
+				SchemaVersion  string `json:"schemaVersion"`
+				PartialFailure string `json:"partialFailure"`
 			} `json:"output"`
 			ExitCodes map[string]string `json:"exitCodes"`
 			Types     map[string]any    `json:"types"`
 			Commands  []struct {
 				Name     string         `json:"name"`
+				Aliases  []string       `json:"aliases"`
 				Auth     bool           `json:"auth"`
 				Mutating bool           `json:"mutating"`
 				JSONData map[string]any `json:"jsonData"`
@@ -321,14 +309,15 @@ func TestRawAndSchema(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.SchemaVersion != "1" || envelope.Data.ContractVersion != "4" || len(envelope.Data.Commands) == 0 {
+	if envelope.SchemaVersion != "1" || envelope.Data.ContractVersion != "3" || len(envelope.Data.Commands) == 0 {
 		t.Fatalf("schema = %+v", envelope)
+	}
+	if strings.Contains(stdout.String(), `"raw"`) {
+		t.Fatalf("removed raw contract remains in schema: %s", stdout.String())
 	}
 	if envelope.Data.Output.SchemaVersion != "1" ||
 		!strings.Contains(envelope.Data.Output.PartialFailure, "stdout") ||
 		!strings.Contains(envelope.Data.Output.PartialFailure, "stderr") ||
-		!strings.Contains(envelope.Data.Output.RawRestrictions, "auth status") ||
-		!strings.Contains(envelope.Data.Output.RawRestrictions, "bulk-transition") ||
 		envelope.Data.ExitCodes["7"] != "partial failure" {
 		t.Fatalf("output contract = %+v exitCodes=%+v", envelope.Data.Output, envelope.Data.ExitCodes)
 	}
@@ -347,6 +336,9 @@ func TestRawAndSchema(t *testing.T) {
 		defaultValue any
 	})
 	for _, command := range envelope.Data.Commands {
+		if len(command.Aliases) != 0 {
+			t.Fatalf("%s still exposes aliases %v", command.Name, command.Aliases)
+		}
 		commands[command.Name] = struct {
 			auth, mutating bool
 		}{command.Auth, command.Mutating}
@@ -384,7 +376,7 @@ func TestRawAndSchema(t *testing.T) {
 				}
 			}
 		}
-		if strings.HasPrefix(command.Name, "issues bulk-") {
+		if strings.HasPrefix(command.Name, "issue bulk ") {
 			items, ok := command.JSONData["items"].([]any)
 			if !ok || len(items) != 1 {
 				t.Fatalf("%s items schema = %#v", command.Name, command.JSONData["items"])
@@ -409,25 +401,25 @@ func TestRawAndSchema(t *testing.T) {
 			t.Fatalf("removed top-level command remains in schema: %q", name)
 		}
 	}
-	if metadata, ok := commands["cache fields refresh"]; !ok || !metadata.auth || !metadata.mutating {
-		t.Fatalf("cache fields refresh schema = %+v, present=%t", metadata, ok)
+	if metadata, ok := commands["cache refresh"]; !ok || !metadata.auth || !metadata.mutating {
+		t.Fatalf("cache refresh schema = %+v, present=%t", metadata, ok)
 	}
 	for _, command := range []struct {
 		name     string
 		mutating bool
 		flags    []string
 	}{
-		{"issues list", false, []string{"resolution", "reporter", "label", "component", "fix-version", "sprint", "parent", "created", "updated"}},
-		{"issues create", true, []string{"parent", "component", "fix-version", "sprint"}},
-		{"issues update", true, []string{"component", "fix-version"}},
-		{"issues move", true, []string{"sprint"}},
-		{"issues assign", true, []string{"assignee"}},
-		{"issues links", false, nil},
-		{"issues link", true, []string{"to", "type"}},
-		{"issues unlink", true, nil},
-		{"issues link-types", false, nil},
-		{"issues bulk-transition", true, []string{"jql", "to", "field", "dry-run", "yes"}},
-		{"issues bulk-assign", true, []string{"jql", "assignee", "dry-run", "yes"}},
+		{"issue list", false, []string{"resolution", "reporter", "label", "component", "fix-version", "sprint", "parent", "created", "updated"}},
+		{"issue add", true, []string{"parent", "component", "fix-version", "sprint"}},
+		{"issue update", true, []string{"component", "fix-version", "sprint"}},
+		{"issue move", true, []string{"to"}},
+		{"issue assign", true, []string{"assignee"}},
+		{"issue link list", false, nil},
+		{"issue link add", true, []string{"to", "type"}},
+		{"issue link delete", true, nil},
+		{"issue link types", false, nil},
+		{"issue bulk move", true, []string{"jql", "to", "field", "dry-run", "yes"}},
+		{"issue bulk assign", true, []string{"jql", "assignee", "dry-run", "yes"}},
 	} {
 		metadata, ok := commands[command.name]
 		if !ok || !metadata.auth || metadata.mutating != command.mutating {
@@ -439,14 +431,14 @@ func TestRawAndSchema(t *testing.T) {
 			}
 		}
 	}
-	for _, command := range []string{"issues list", "issues create", "issues update"} {
+	for _, command := range []string{"issue list", "issue add", "issue update"} {
 		for _, name := range []string{"label", "component", "fix-version"} {
 			if flag, ok := flags[command][name]; ok && !flag.repeatable {
 				t.Fatalf("%s --%s is not repeatable", command, name)
 			}
 		}
 	}
-	for _, command := range []string{"issues create", "issues update", "issues comment"} {
+	for _, command := range []string{"issue add", "issue update", "issue comment add"} {
 		inputFormat, ok := flags[command]["input-format"]
 		if !ok || inputFormat.kind != "enum:jira|markdown" || inputFormat.defaultValue != "jira" {
 			t.Fatalf("%s --input-format schema = %+v, present=%t", command, inputFormat, ok)
@@ -457,7 +449,7 @@ func TestRawAndSchema(t *testing.T) {
 func TestMissingRequiredFlagIsInputError(t *testing.T) {
 	clearCommandEnv(t)
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"-ojson", "issues", "create", "--project", "OPS"}, strings.NewReader(""), stdout, stderr)
+	code := Execute([]string{"-ojson", "issue", "add", "--project", "OPS"}, strings.NewReader(""), stdout, stderr)
 	if code != 2 || stdout.Len() != 0 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}

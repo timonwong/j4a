@@ -52,7 +52,7 @@ func TestIssuesAssignResolvesMeAndSupportsNone(t *testing.T) {
 			stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 			code := Execute([]string{
 				"--config", writeCLIConfig(t, server.URL, false), "-ojson",
-				"issues", "assign", "OPS-1", "--assignee", test.value,
+				"issue", "assign", "OPS-1", "--assignee", test.value,
 			}, strings.NewReader(""), stdout, stderr)
 			if code != 0 || stderr.Len() != 0 {
 				t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -107,7 +107,7 @@ func TestIssuesLinkResolvesTypeAndPreservesOutwardDirection(t *testing.T) {
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
 		"--config", writeCLIConfig(t, server.URL, false), "-ojson",
-		"issues", "link", "OPS-1", "--to", "OPS-2", "--type", "depends",
+		"issue", "link", "add", "OPS-1", "--to", "OPS-2", "--type", "depends",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -129,7 +129,7 @@ func TestIssuesLinkRejectsNumericIDNameAmbiguity(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "link", "OPS-1", "--to", "OPS-2", "--type", "10000",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "link", "add", "OPS-1", "--to", "OPS-2", "--type", "10000",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "ambiguous") {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -161,7 +161,7 @@ func TestIssueLinkDiscoveryAndDeletion(t *testing.T) {
 
 	t.Run("links expose the Jira link ID and direction", func(t *testing.T) {
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-		code := Execute([]string{"--config", configPath, "-ojson", "issues", "links", "OPS-1"}, strings.NewReader(""), stdout, stderr)
+		code := Execute([]string{"--config", configPath, "-ojson", "issue", "link", "list", "OPS-1"}, strings.NewReader(""), stdout, stderr)
 		if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"id":"55"`) || !strings.Contains(stdout.String(), `"direction":"outward"`) {
 			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
@@ -169,7 +169,7 @@ func TestIssueLinkDiscoveryAndDeletion(t *testing.T) {
 
 	t.Run("link types expose both relationships", func(t *testing.T) {
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-		code := Execute([]string{"--config", configPath, "-ojson", "issues", "link-types"}, strings.NewReader(""), stdout, stderr)
+		code := Execute([]string{"--config", configPath, "-ojson", "issue", "link", "types"}, strings.NewReader(""), stdout, stderr)
 		if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"inward":"is depended on by"`) || !strings.Contains(stdout.String(), `"outward":"depends on"`) {
 			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
@@ -177,7 +177,7 @@ func TestIssueLinkDiscoveryAndDeletion(t *testing.T) {
 
 	t.Run("unlink deletes only by Jira link ID", func(t *testing.T) {
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-		code := Execute([]string{"--config", configPath, "-ojson", "issues", "unlink", "55"}, strings.NewReader(""), stdout, stderr)
+		code := Execute([]string{"--config", configPath, "-ojson", "issue", "link", "delete", "55"}, strings.NewReader(""), stdout, stderr)
 		if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"linkId":"55"`) {
 			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
@@ -193,7 +193,7 @@ func TestIssuesUnlinkRejectsIssueKeysBeforeNetwork(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "unlink", "OPS-1",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "link", "delete", "OPS-1",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 2 || !strings.Contains(stderr.String(), `"kind":"invalid_input"`) {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -238,7 +238,7 @@ func TestIssueCreateAndUpdateStandardRelationshipFields(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", configPath, "issues", "create", "--project", "OPS", "--type", "Task", "--summary", "Child",
+		"--config", configPath, "issue", "add", "--project", "OPS", "--type", "Task", "--summary", "Child",
 		"--parent", "OPS-1", "--component", "API", "--component", "UI", "--fix-version", "4.4",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 0 || stderr.Len() != 0 {
@@ -248,7 +248,7 @@ func TestIssueCreateAndUpdateStandardRelationshipFields(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	code = Execute([]string{
-		"--config", configPath, "issues", "update", "OPS-2", "--component", "none", "--fix-version", "4.5", "--fix-version", "4.6",
+		"--config", configPath, "issue", "update", "OPS-2", "--component", "none", "--fix-version", "4.5", "--fix-version", "4.6",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 0 || stderr.Len() != 0 || requestNumber != 2 {
 		t.Fatalf("update code=%d requests=%d stdout=%s stderr=%s", code, requestNumber, stdout.String(), stderr.String())
@@ -271,7 +271,7 @@ func TestIssueCreateWithSprintPreservesCreatedResultOnMoveFailure(t *testing.T) 
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "add",
 		"--project", "OPS", "--type", "Task", "--summary", "Scheduled", "--sprint", "missing",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 7 {
@@ -310,7 +310,7 @@ func TestIssueCreateWithSprintAndMoveSucceed(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "add",
 		"--project", "OPS", "--type", "Task", "--summary", "Scheduled", "--sprint", "42",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"sprintMoved":true`) {
@@ -338,7 +338,7 @@ func TestIssueCreateWithSprintMoveFailureNeverRollsBack(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "create",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "add",
 		"--project", "OPS", "--type", "Task", "--summary", "Scheduled", "--sprint", "42",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 7 || !strings.Contains(stdout.String(), `"key":"OPS-12"`) || !strings.Contains(stderr.String(), `"kind":"partial_failure"`) {
@@ -362,7 +362,7 @@ func TestPartialCreateResultIsWrittenInQuietTextMode(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "--quiet", "issues", "create",
+		"--config", writeCLIConfig(t, server.URL, false), "--quiet", "issue", "add",
 		"--project", "OPS", "--type", "Task", "--summary", "Scheduled", "--sprint", "missing",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 7 || stdout.String() != "Created OPS-13\n" || !strings.Contains(stderr.String(), "failed to move") {
@@ -370,7 +370,7 @@ func TestPartialCreateResultIsWrittenInQuietTextMode(t *testing.T) {
 	}
 }
 
-func TestIssuesMoveUsesSprintSpec(t *testing.T) {
+func TestIssueUpdateSprintOnlyUsesAgileEndpoint(t *testing.T) {
 	clearCommandEnv(t)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/rest/agile/1.0/sprint/42/issue" || request.Method != http.MethodPost {
@@ -391,11 +391,75 @@ func TestIssuesMoveUsesSprintSpec(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issues", "move", "OPS-11", "--sprint", "42",
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "update", "OPS-11", "--sprint", "42",
 	}, strings.NewReader(""), stdout, stderr)
-	if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"sprint":"42"`) {
+	if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"sprint":"42"`) || !strings.Contains(stdout.String(), `"sprintMoved":true`) {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
+}
+
+func TestIssueUpdateSprintPreflightsThenPreservesPartialResult(t *testing.T) {
+	clearCommandEnv(t)
+
+	t.Run("invalid selector performs no write", func(t *testing.T) {
+		calls := 0
+		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+		defer server.Close()
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		code := Execute([]string{
+			"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "update", "OPS-11",
+			"--field", "story-points=5", "--sprint", "0",
+		}, strings.NewReader(""), stdout, stderr)
+		if code != 2 || calls != 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "sprint ID must be positive") {
+			t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("field update precedes sprint and sprint failure is partial", func(t *testing.T) {
+		var calls []string
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			switch {
+			case request.Method == http.MethodPut && request.URL.Path == "/rest/api/2/issue/OPS-11":
+				calls = append(calls, "fields")
+				writer.WriteHeader(http.StatusNoContent)
+			case request.Method == http.MethodPost && request.URL.Path == "/rest/agile/1.0/sprint/42/issue":
+				calls = append(calls, "sprint")
+				writer.WriteHeader(http.StatusInternalServerError)
+				_, _ = io.WriteString(writer, `{"errorMessages":["sprint unavailable"]}`)
+			default:
+				t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+			}
+		}))
+		defer server.Close()
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		code := Execute([]string{
+			"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "update", "OPS-11",
+			"--summary", "Updated", "--sprint", "42",
+		}, strings.NewReader(""), stdout, stderr)
+		if code != 7 || strings.Join(calls, ",") != "fields,sprint" ||
+			!strings.Contains(stdout.String(), `"updated":true`) || !strings.Contains(stdout.String(), `"sprint":"42"`) ||
+			!strings.Contains(stdout.String(), `"sprintMoved":false`) || !strings.Contains(stderr.String(), `"kind":"partial_failure"`) {
+			t.Fatalf("code=%d calls=%v stdout=%s stderr=%s", code, calls, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("sprint-only failure is not partial", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if request.Method != http.MethodPost || request.URL.Path != "/rest/agile/1.0/sprint/42/issue" {
+				t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+			}
+			writer.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(writer, `{"errorMessages":["sprint unavailable"]}`)
+		}))
+		defer server.Close()
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		code := Execute([]string{
+			"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "update", "OPS-11", "--sprint", "42",
+		}, strings.NewReader(""), stdout, stderr)
+		if code != 5 || stdout.Len() != 0 || strings.Contains(stderr.String(), `"kind":"partial_failure"`) {
+			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+	})
 }
 
 func TestIssuesListWiresExtendedFilters(t *testing.T) {
@@ -424,7 +488,7 @@ func TestIssuesListWiresExtendedFilters(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
-		"--config", writeCLIConfig(t, server.URL, true), "issues", "list",
+		"--config", writeCLIConfig(t, server.URL, true), "issue", "list",
 		"--resolution", "unresolved", "--reporter", "me", "--label", "agent", "--label", "cli",
 		"--component", "API", "--fix-version", "4.4", "--sprint", "active", "--parent", "OPS-1",
 		"--created", "2026-07-31", "--updated=-7d",
@@ -466,17 +530,17 @@ func TestNewIssueCommandsRenderTextAndJSON(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"list filters", []string{"issues", "list", "--resolution", "unresolved", "--sprint", "active"}},
-		{"create fields and sprint", []string{"issues", "create", "--project", "OPS", "--type", "Task", "--summary", "Create", "--parent", "OPS-1", "--component", "API", "--fix-version", "4.4", "--sprint", "42"}},
-		{"update fields", []string{"issues", "update", "OPS-1", "--component", "none", "--fix-version", "4.5"}},
-		{"assign", []string{"issues", "assign", "OPS-1", "--assignee", "alice"}},
-		{"move", []string{"issues", "move", "OPS-1", "--sprint", "42"}},
-		{"links", []string{"issues", "links", "OPS-1"}},
-		{"link", []string{"issues", "link", "OPS-1", "--to", "OPS-2", "--type", "Blocks"}},
-		{"unlink", []string{"issues", "unlink", "55"}},
-		{"link types", []string{"issues", "link-types"}},
-		{"bulk transition", []string{"issues", "bulk-transition", "--jql", "project = EMPTY", "--to", "Done", "--dry-run"}},
-		{"bulk assign", []string{"issues", "bulk-assign", "--jql", "project = EMPTY", "--assignee", "alice", "--dry-run"}},
+		{"list filters", []string{"issue", "list", "--resolution", "unresolved", "--sprint", "active"}},
+		{"create fields and sprint", []string{"issue", "add", "--project", "OPS", "--type", "Task", "--summary", "Create", "--parent", "OPS-1", "--component", "API", "--fix-version", "4.4", "--sprint", "42"}},
+		{"update fields", []string{"issue", "update", "OPS-1", "--component", "none", "--fix-version", "4.5"}},
+		{"assign", []string{"issue", "assign", "OPS-1", "--assignee", "alice"}},
+		{"move", []string{"issue", "update", "OPS-1", "--sprint", "42"}},
+		{"links", []string{"issue", "link", "list", "OPS-1"}},
+		{"link", []string{"issue", "link", "add", "OPS-1", "--to", "OPS-2", "--type", "Blocks"}},
+		{"unlink", []string{"issue", "link", "delete", "55"}},
+		{"link types", []string{"issue", "link", "types"}},
+		{"bulk transition", []string{"issue", "bulk", "move", "--jql", "project = EMPTY", "--to", "Done", "--dry-run"}},
+		{"bulk assign", []string{"issue", "bulk", "assign", "--jql", "project = EMPTY", "--assignee", "alice", "--dry-run"}},
 	}
 	for _, command := range commands {
 		for _, format := range []string{"text", "json"} {
@@ -513,10 +577,10 @@ func TestNewIssueCommandRequiredFlagsFailBeforeNetwork(t *testing.T) {
 	defer server.Close()
 	configPath := writeCLIConfig(t, server.URL, false)
 	commands := [][]string{
-		{"issues", "assign", "OPS-1"},
-		{"issues", "move", "OPS-1"},
-		{"issues", "link", "OPS-1", "--to", "OPS-2"},
-		{"issues", "link", "OPS-1", "--type", "Blocks"},
+		{"issue", "assign", "OPS-1"},
+		{"issue", "update", "OPS-1"},
+		{"issue", "link", "add", "OPS-1", "--to", "OPS-2"},
+		{"issue", "link", "add", "OPS-1", "--type", "Blocks"},
 	}
 	for _, command := range commands {
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
@@ -534,10 +598,10 @@ func TestNewIssueMutationsRespectReadOnlyBeforeCredentialResolution(t *testing.T
 		t.Fatal(err)
 	}
 	commands := [][]string{
-		{"issues", "assign", "OPS-1", "--assignee", "alice"},
-		{"issues", "move", "OPS-1", "--sprint", "42"},
-		{"issues", "link", "OPS-1", "--to", "OPS-2", "--type", "10000"},
-		{"issues", "unlink", "55"},
+		{"issue", "assign", "OPS-1", "--assignee", "alice"},
+		{"issue", "update", "OPS-1", "--sprint", "42"},
+		{"issue", "link", "add", "OPS-1", "--to", "OPS-2", "--type", "10000"},
+		{"issue", "link", "delete", "55"},
 	}
 	for _, command := range commands {
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
