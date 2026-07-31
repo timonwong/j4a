@@ -215,7 +215,7 @@ func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing
 			if envelope.SchemaVersion != "1" || envelope.Error.Kind != "invalid_input" ||
 				!strings.Contains(envelope.Error.Message, "line 3, column 3") ||
 				!strings.Contains(envelope.Error.Message, "Blockquote") ||
-				!strings.Contains(envelope.Error.Message, "nested blockquotes are not supported") {
+				!strings.Contains(envelope.Error.Message, "blockquotes may contain only paragraphs") {
 				t.Fatalf("error envelope = %+v", envelope)
 			}
 		})

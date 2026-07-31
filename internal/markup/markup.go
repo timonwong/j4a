@@ -135,6 +135,11 @@ type jiraMarkupRenderer struct {
 	source []byte
 }
 
+const (
+	listItemBlockReason   = "list items may contain only text and nested lists"
+	blockquoteBlockReason = "blockquotes may contain only paragraphs"
+)
+
 func (r jiraMarkupRenderer) renderDocument(document ast.Node) (string, error) {
 	blocks := make([]string, 0, document.ChildCount())
 	for node := document.FirstChild(); node != nil; node = node.NextSibling() {
@@ -175,17 +180,11 @@ func (r jiraMarkupRenderer) renderBlock(node ast.Node) (string, error) {
 }
 
 func (r jiraMarkupRenderer) renderBlockquote(blockquote *ast.Blockquote) (string, error) {
-	if blockquote.ChildCount() == 0 {
-		return "", r.conversionError(blockquote, "blockquotes must contain at least one paragraph")
-	}
 	paragraphs := make([]string, 0, blockquote.ChildCount())
 	for child := blockquote.FirstChild(); child != nil; child = child.NextSibling() {
 		paragraph, ok := child.(*ast.Paragraph)
 		if !ok {
-			if _, nested := child.(*ast.Blockquote); nested {
-				return "", r.conversionError(child, "nested blockquotes are not supported")
-			}
-			return "", r.conversionError(child, "blockquotes support only paragraphs")
+			return "", r.conversionError(child, blockquoteBlockReason)
 		}
 		content, err := r.renderInlines(paragraph, true)
 		if err != nil {
@@ -197,57 +196,53 @@ func (r jiraMarkupRenderer) renderBlockquote(blockquote *ast.Blockquote) (string
 }
 
 func (r jiraMarkupRenderer) renderList(list *ast.List, parentMarkers string) (string, error) {
-	listItems := make([]*ast.ListItem, 0, list.ChildCount())
+	if !list.IsTight {
+		return "", r.conversionError(list, "loose list items with multiple blocks are not supported")
+	}
+	marker := parentMarkers + "*"
+	if list.IsOrdered() {
+		marker = parentMarkers + "#"
+	}
+	lines := make([]string, 0, list.ChildCount())
 	for child := list.FirstChild(); child != nil; child = child.NextSibling() {
 		item, ok := child.(*ast.ListItem)
-		if !ok || item.FirstChild() == nil {
+		if !ok {
 			return "", r.unsupported(list)
 		}
-		listItems = append(listItems, item)
-		first := item.FirstChild()
-		if _, textBlock := first.(*ast.TextBlock); !textBlock {
-			if _, paragraph := first.(*ast.Paragraph); !paragraph {
-				return "", r.conversionError(first, "list items support only text followed by nested lists")
-			}
-		}
-		for nested := first.NextSibling(); nested != nil; nested = nested.NextSibling() {
-			switch nested.(type) {
-			case *ast.List, *ast.Paragraph:
-			default:
-				return "", r.conversionError(nested, "list items support only text followed by nested lists")
-			}
-		}
-	}
-	if !list.IsTight {
-		return "", r.conversionError(list, "loose lists are not supported")
-	}
-	marker := "*"
-	if list.IsOrdered() {
-		marker = "#"
-	}
-	markers := parentMarkers + marker
-	items := make([]string, 0, len(listItems))
-	for _, item := range listItems {
-		textBlock := item.FirstChild().(*ast.TextBlock)
-		content, err := r.renderInlines(textBlock, false)
-		if err != nil {
-			return "", err
-		}
-		itemMarkup := markers
-		if content != "" {
-			itemMarkup += " " + content
-		}
-		items = append(items, itemMarkup)
-		for nested := textBlock.NextSibling(); nested != nil; nested = nested.NextSibling() {
-			nestedList := nested.(*ast.List)
-			nestedMarkup, err := r.renderList(nestedList, markers)
+		var content string
+		var nestedStart ast.Node
+		switch firstBlock := item.FirstChild().(type) {
+		case *ast.TextBlock:
+			var err error
+			content, err = r.renderInlines(firstBlock, false)
 			if err != nil {
 				return "", err
 			}
-			items = append(items, nestedMarkup)
+			nestedStart = firstBlock.NextSibling()
+		case *ast.List:
+			nestedStart = firstBlock
+		case nil:
+		default:
+			return "", r.conversionError(firstBlock, listItemBlockReason)
+		}
+		itemMarkup := marker
+		if content != "" {
+			itemMarkup += " " + content
+		}
+		lines = append(lines, itemMarkup)
+		for block := nestedStart; block != nil; block = block.NextSibling() {
+			nestedList, ok := block.(*ast.List)
+			if !ok {
+				return "", r.conversionError(block, listItemBlockReason)
+			}
+			nestedMarkup, err := r.renderList(nestedList, marker)
+			if err != nil {
+				return "", err
+			}
+			lines = append(lines, nestedMarkup)
 		}
 	}
-	return strings.Join(items, "\n"), nil
+	return strings.Join(lines, "\n"), nil
 }
 
 func (r jiraMarkupRenderer) renderInlines(parent ast.Node, atLineStart bool) (string, error) {

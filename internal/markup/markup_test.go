@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -15,13 +14,9 @@ type markdownConversionCase struct {
 	want  string
 }
 
-type markdownConversionErrorCase struct {
-	name     string
-	input    string
-	line     int
-	column   int
-	nodeType string
-	reason   string
+type markdownGoldenFixture struct {
+	Input string `json:"input"`
+	Want  string `json:"want"`
 }
 
 func assertMarkdownConversions(t *testing.T, tests []markdownConversionCase) {
@@ -40,52 +35,42 @@ func assertMarkdownConversions(t *testing.T, tests []markdownConversionCase) {
 	}
 }
 
-func assertMarkdownConversionErrors(t *testing.T, tests []markdownConversionErrorCase) {
+func assertMarkdownConversionError(t *testing.T, input string, want ConversionError) {
 	t.Helper()
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			got, err := ToJira(test.input, Markdown)
-			if got != "" {
-				t.Fatalf("ToJira() output = %q, want no partial output", got)
-			}
-			var conversionErr *ConversionError
-			if !errors.As(err, &conversionErr) {
-				t.Fatalf("ToJira() error = %T %v, want *ConversionError", err, err)
-			}
-			want := ConversionError{
-				Line:     test.line,
-				Column:   test.column,
-				NodeType: test.nodeType,
-				Reason:   test.reason,
-			}
-			if *conversionErr != want {
-				t.Fatalf("ConversionError = %+v, want %+v", *conversionErr, want)
-			}
-		})
+	got, err := ToJira(input, Markdown)
+	if got != "" {
+		t.Fatalf("ToJira() output = %q, want no partial output", got)
+	}
+	var conversionErr *ConversionError
+	if !errors.As(err, &conversionErr) {
+		t.Fatalf("ToJira() error = %T %v, want *ConversionError", err, err)
+	}
+	if *conversionErr != want {
+		t.Fatalf("ConversionError = %+v, want %+v", conversionErr, want)
 	}
 }
 
-func assertMarkdownGolden(t *testing.T, name string) {
-	t.Helper()
-	input, err := os.ReadFile(filepath.Join("testdata", name+".md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantJSON, err := os.ReadFile(filepath.Join("testdata", name+".wiki.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var want string
-	if err := json.Unmarshal(wantJSON, &want); err != nil {
-		t.Fatal(err)
-	}
-	got, err := ToJira(string(input), Markdown)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != want {
-		t.Fatalf("ToJira() = %q, want %q", got, want)
+func TestToJiraMatchesComplexStructureGoldenFixtures(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"complex_mixed_list", "formatted_blockquote"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			contents, err := os.ReadFile("testdata/" + name + ".json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fixture markdownGoldenFixture
+			if err := json.Unmarshal(contents, &fixture); err != nil {
+				t.Fatal(err)
+			}
+			got, err := ToJira(fixture.Input, Markdown)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != fixture.Want {
+				t.Fatalf("ToJira() = %q, want %q", got, fixture.Want)
+			}
+		})
 	}
 }
 
@@ -144,6 +129,134 @@ func TestToJiraConvertsInitialMarkdownInputTracer(t *testing.T) {
 			if got != "" && strings.TrimSpace(got) != got {
 				t.Fatalf("ToJira() has leading or terminal whitespace: %q", got)
 			}
+		})
+	}
+}
+
+func TestToJiraPreservesTightNestedListOwnershipAndOrder(t *testing.T) {
+	t.Parallel()
+	input := "- alpha\n  7. first\n     - leaf\n  8. second\n- omega"
+	want := "* alpha\n*# first\n*#* leaf\n*# second\n* omega"
+
+	got, err := ToJira(input, Markdown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("ToJira() = %q, want %q", got, want)
+	}
+}
+
+func TestToJiraPreservesNestedListOwnedByEmptyParentItem(t *testing.T) {
+	t.Parallel()
+	input := "-\n  - child\n- sibling"
+	want := "*\n** child\n* sibling"
+
+	got, err := ToJira(input, Markdown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("ToJira() = %q, want %q", got, want)
+	}
+}
+
+func TestToJiraNormalizesOrderedListStartValue(t *testing.T) {
+	t.Parallel()
+	assertMarkdownConversions(t, []markdownConversionCase{
+		{name: "dot marker interrupts paragraph", input: "intro\n7. seven\n8. eight", want: "intro\n\n# seven\n# eight"},
+		{name: "parenthesis marker interrupts paragraph", input: "intro\n3) three\n4) four", want: "intro\n\n# three\n# four"},
+	})
+}
+
+func TestToJiraPreservesFormattedBlockquoteParagraphs(t *testing.T) {
+	t.Parallel()
+	input := "> **alpha**\n>\n> beta _two_"
+	want := "{quote}\n*alpha*\n\nbeta _two_\n{quote}"
+
+	got, err := ToJira(input, Markdown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("ToJira() = %q, want %q", got, want)
+	}
+}
+
+func TestToJiraRejectsLooseMultiBlockListItems(t *testing.T) {
+	t.Parallel()
+	assertMarkdownConversionError(t, "- first paragraph\n\n  second paragraph", ConversionError{
+		Line:     1,
+		Column:   1,
+		NodeType: "List",
+		Reason:   "loose list items with multiple blocks are not supported",
+	})
+}
+
+func TestToJiraRejectsFencedCodeInsideListItem(t *testing.T) {
+	t.Parallel()
+	assertMarkdownConversionError(t, "- item\n  ```go\n  code\n  ```", ConversionError{
+		Line:     2,
+		Column:   3,
+		NodeType: "FencedCodeBlock",
+		Reason:   "list items may contain only text and nested lists",
+	})
+}
+
+func TestToJiraRejectsBlockquoteInsideListItem(t *testing.T) {
+	t.Parallel()
+	assertMarkdownConversionError(t, "- item\n  > quote", ConversionError{
+		Line:     2,
+		Column:   3,
+		NodeType: "Blockquote",
+		Reason:   "list items may contain only text and nested lists",
+	})
+}
+
+func TestToJiraRejectsOtherBlockNodesInsideListItem(t *testing.T) {
+	t.Parallel()
+	assertMarkdownConversionError(t, "- item\n  # heading", ConversionError{
+		Line:     2,
+		Column:   3,
+		NodeType: "Heading",
+		Reason:   "list items may contain only text and nested lists",
+	})
+}
+
+func TestToJiraRejectsNestedBlockquotes(t *testing.T) {
+	t.Parallel()
+	assertMarkdownConversionError(t, "> outer\n>\n> > nested", ConversionError{
+		Line:     3,
+		Column:   3,
+		NodeType: "Blockquote",
+		Reason:   "blockquotes may contain only paragraphs",
+	})
+}
+
+func TestToJiraRejectsNonParagraphBlocksInsideBlockquotes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		input    string
+		line     int
+		column   int
+		nodeType string
+	}{
+		{name: "list", input: "> intro\n>\n> - item", line: 3, column: 3, nodeType: "List"},
+		{name: "table", input: "> | A |\n> | - |\n> | B |", line: 1, column: 3, nodeType: "Table"},
+		{name: "fenced code", input: "> ```go\n> code\n> ```", line: 1, column: 3, nodeType: "FencedCodeBlock"},
+		{name: "indented code", input: ">     code", line: 1, column: 7, nodeType: "CodeBlock"},
+		{name: "heading", input: "> # heading", line: 1, column: 3, nodeType: "Heading"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assertMarkdownConversionError(t, test.input, ConversionError{
+				Line:     test.line,
+				Column:   test.column,
+				NodeType: test.nodeType,
+				Reason:   "blockquotes may contain only paragraphs",
+			})
 		})
 	}
 }
@@ -236,105 +349,6 @@ func TestToJiraEscapesUserTextForJiraMarkup(t *testing.T) {
 	assertMarkdownConversions(t, tests)
 }
 
-func TestToJiraPreservesNestedListOwnership(t *testing.T) {
-	t.Parallel()
-	assertMarkdownGolden(t, "issue6_nested_lists")
-}
-
-func TestToJiraNormalizesOrderedListStarts(t *testing.T) {
-	t.Parallel()
-	tests := []markdownConversionCase{
-		{name: "dot marker interrupts paragraph", input: "intro\n7. seven\n8. eight", want: "intro\n\n# seven\n# eight"},
-		{name: "parenthesis marker interrupts paragraph", input: "intro\n3) three\n4) four", want: "intro\n\n# three\n# four"},
-	}
-	assertMarkdownConversions(t, tests)
-}
-
-func TestToJiraRejectsLooseListWithoutPartialOutput(t *testing.T) {
-	t.Parallel()
-	assertMarkdownConversionErrors(t, []markdownConversionErrorCase{{
-		name:     "multiple paragraphs",
-		input:    "before\n\n- first paragraph\n\n  second paragraph\n- next",
-		line:     3,
-		column:   1,
-		nodeType: "List",
-		reason:   "loose lists are not supported",
-	}})
-}
-
-func TestToJiraRejectsUnsupportedBlocksInsideListItem(t *testing.T) {
-	t.Parallel()
-	const reason = "list items support only text followed by nested lists"
-	tests := []markdownConversionErrorCase{
-		{
-			name:     "fenced code",
-			input:    "before\n\n- paragraph\n\n  ```go\n  package main\n  ```",
-			line:     5,
-			column:   3,
-			nodeType: "FencedCodeBlock",
-			reason:   reason,
-		},
-		{
-			name:     "blockquote",
-			input:    "before\n\n- paragraph\n\n  > quote",
-			line:     5,
-			column:   3,
-			nodeType: "Blockquote",
-			reason:   reason,
-		},
-		{
-			name:     "heading",
-			input:    "before\n\n- # heading",
-			line:     3,
-			column:   3,
-			nodeType: "Heading",
-			reason:   reason,
-		},
-	}
-	assertMarkdownConversionErrors(t, tests)
-}
-
-func TestToJiraPreservesBlockquoteParagraphs(t *testing.T) {
-	t.Parallel()
-	assertMarkdownGolden(t, "issue6_blockquote")
-}
-
-func TestToJiraRejectsNestedBlockquote(t *testing.T) {
-	t.Parallel()
-	assertMarkdownConversionErrors(t, []markdownConversionErrorCase{{
-		name:     "nested quote",
-		input:    "before\n\n> outer\n>\n> > inner",
-		line:     5,
-		column:   3,
-		nodeType: "Blockquote",
-		reason:   "nested blockquotes are not supported",
-	}})
-}
-
-func TestToJiraRejectsEmptyBlockquote(t *testing.T) {
-	t.Parallel()
-	assertMarkdownConversionErrors(t, []markdownConversionErrorCase{{
-		name:     "empty quote",
-		input:    ">",
-		line:     1,
-		column:   1,
-		nodeType: "Blockquote",
-		reason:   "blockquotes must contain at least one paragraph",
-	}})
-}
-
-func TestToJiraRejectsNonParagraphBlocksInsideBlockquote(t *testing.T) {
-	t.Parallel()
-	const reason = "blockquotes support only paragraphs"
-	tests := []markdownConversionErrorCase{
-		{name: "list", input: "> intro\n>\n> - item", line: 3, column: 3, nodeType: "List", reason: reason},
-		{name: "table", input: "> | A |\n> | - |\n> | B |", line: 1, column: 3, nodeType: "Table", reason: reason},
-		{name: "fenced code", input: "> ```go\n> code\n> ```", line: 1, column: 3, nodeType: "FencedCodeBlock", reason: reason},
-		{name: "heading", input: "> # heading", line: 1, column: 3, nodeType: "Heading", reason: reason},
-	}
-	assertMarkdownConversionErrors(t, tests)
-}
-
 func TestToJiraRendersRawHTMLAsEscapedLiteralText(t *testing.T) {
 	t.Parallel()
 	tests := []markdownConversionCase{
@@ -375,12 +389,25 @@ func TestToJiraRejectsUnknownInputFormat(t *testing.T) {
 
 func TestToJiraReportsUnsupportedMarkdownInputSyntaxWithoutPartialOutput(t *testing.T) {
 	t.Parallel()
-	assertMarkdownConversionErrors(t, []markdownConversionErrorCase{{
-		name:     "table extension is enabled and earlier blocks are discarded",
-		input:    "supported\n\n| A |\n| - |\n| B |",
-		line:     3,
-		column:   1,
-		nodeType: "Table",
-		reason:   "unsupported Markdown Input syntax",
-	}})
+	tests := []struct {
+		name     string
+		input    string
+		line     int
+		column   int
+		nodeType string
+	}{
+		{name: "discards earlier blocks", input: "supported\n\n```go\nnot supported\n```", line: 3, column: 1, nodeType: "FencedCodeBlock"},
+		{name: "table extension is enabled", input: "| A |\n| - |\n| B |", line: 1, column: 1, nodeType: "Table"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assertMarkdownConversionError(t, test.input, ConversionError{
+				Line:     test.line,
+				Column:   test.column,
+				NodeType: test.nodeType,
+				Reason:   "unsupported Markdown Input syntax",
+			})
+		})
+	}
 }
