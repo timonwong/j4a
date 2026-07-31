@@ -168,6 +168,7 @@ func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing
 	}))
 	defer server.Close()
 	configPath := writeCLIConfig(t, server.URL, false)
+	unsupportedTableCell := "| H |\n| --- |\n| ![alt](image.png) |"
 
 	tests := []struct {
 		name string
@@ -177,19 +178,19 @@ func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing
 			name: "issue create",
 			args: []string{
 				"issues", "create", "--project", "OPS", "--type", "Story", "--summary", "Unsupported input",
-				"--description", "| A |\n| - |\n| B |", "--input-format=markdown", "--field", "story-points=5",
+				"--description", unsupportedTableCell, "--input-format=markdown", "--field", "story-points=5",
 			},
 		},
 		{
 			name: "issue update",
 			args: []string{
-				"issues", "update", "OPS-1", "--description", "| A |\n| - |\n| B |", "--input-format=markdown",
+				"issues", "update", "OPS-1", "--description", unsupportedTableCell, "--input-format=markdown",
 				"--field", "story-points=5",
 			},
 		},
 		{
 			name: "issue comment",
-			args: []string{"issues", "comment", "OPS-1", "--body", "| A |\n| - |\n| B |", "--input-format=markdown"},
+			args: []string{"issues", "comment", "OPS-1", "--body", unsupportedTableCell, "--input-format=markdown"},
 		},
 	}
 	for _, test := range tests {
@@ -212,9 +213,9 @@ func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing
 				t.Fatal(err)
 			}
 			if envelope.SchemaVersion != "1" || envelope.Error.Kind != "invalid_input" ||
-				!strings.Contains(envelope.Error.Message, "line 1, column 1") ||
-				!strings.Contains(envelope.Error.Message, "Table") ||
-				!strings.Contains(envelope.Error.Message, "unsupported Markdown Input syntax") {
+				!strings.Contains(envelope.Error.Message, "line 3, column 3") ||
+				!strings.Contains(envelope.Error.Message, "Image") ||
+				!strings.Contains(envelope.Error.Message, "images are not supported in table cells") {
 				t.Fatalf("error envelope = %+v", envelope)
 			}
 		})

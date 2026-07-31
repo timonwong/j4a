@@ -53,7 +53,7 @@ func assertMarkdownConversionError(t *testing.T, input string, want ConversionEr
 
 func TestToJiraMatchesComplexStructureGoldenFixtures(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"complex_mixed_list", "formatted_blockquote"} {
+	for _, name := range []string{"complex_mixed_list", "formatted_blockquote", "formatted_table"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			contents, err := os.ReadFile("testdata/" + name + ".json")
@@ -344,6 +344,56 @@ func TestToJiraPreservesFormattedBlockquoteParagraphs(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("ToJira() = %q, want %q", got, want)
+	}
+}
+
+func TestToJiraRendersTablesWithSupportedInlineContent(t *testing.T) {
+	t.Parallel()
+	input := "| Name | Details |\n| :--- | :---: |\n| **jiro** | _Markdown_ with ~~old~~ and `code` |\n| [Docs](https://example.com/docs) | literal \\| pipe |\n| `a\\|b` | [Query](https://example.com/?q=a%7Cb) |"
+	want := "||Name||Details||\n|*jiro*|_Markdown_ with -old- and {{code}}|\n|[Docs|https://example.com/docs]|literal \\| pipe|\n|{{a\\|b}}|[Query|https://example.com/?q=a%7Cb]|"
+
+	got, err := ToJira(input, Markdown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("ToJira() = %q, want %q", got, want)
+	}
+}
+
+func TestToJiraRejectsUnsupportedTableCellContent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		want  ConversionError
+	}{
+		{
+			name:  "image",
+			input: "| H |\n| --- |\n| ![alt](image.png) |",
+			want: ConversionError{
+				Line:     3,
+				Column:   3,
+				NodeType: "Image",
+				Reason:   "images are not supported in table cells",
+			},
+		},
+		{
+			name:  "raw HTML",
+			input: "| H |\n| --- |\n| <span>bad</span> |",
+			want: ConversionError{
+				Line:     3,
+				Column:   3,
+				NodeType: "RawHTML",
+				Reason:   "raw HTML is not supported in table cells",
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assertMarkdownConversionError(t, test.input, test.want)
+		})
 	}
 }
 
@@ -703,7 +753,7 @@ func TestToJiraRejectsUnknownInputFormat(t *testing.T) {
 	}
 }
 
-func TestToJiraReportsUnsupportedMarkdownInputSyntaxWithoutPartialOutput(t *testing.T) {
+func TestToJiraReportsUnsupportedTableCellContentWithoutPartialOutput(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name     string
@@ -712,8 +762,7 @@ func TestToJiraReportsUnsupportedMarkdownInputSyntaxWithoutPartialOutput(t *test
 		column   int
 		nodeType string
 	}{
-		{name: "discards earlier blocks", input: "supported\n\n| A |\n| - |\n| B |", line: 3, column: 1, nodeType: "Table"},
-		{name: "table extension is enabled", input: "| A |\n| - |\n| B |", line: 1, column: 1, nodeType: "Table"},
+		{name: "discards earlier blocks", input: "supported\n\n| H |\n| --- |\n| ![alt](image.png) |", line: 5, column: 3, nodeType: "Image"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -722,7 +771,7 @@ func TestToJiraReportsUnsupportedMarkdownInputSyntaxWithoutPartialOutput(t *test
 				Line:     test.line,
 				Column:   test.column,
 				NodeType: test.nodeType,
-				Reason:   "unsupported Markdown Input syntax",
+				Reason:   "images are not supported in table cells",
 			})
 		})
 	}
