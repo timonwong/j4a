@@ -142,17 +142,52 @@ Core examples:
 ```sh
 j4a myself
 j4a issues list --project OPS --status "In Progress"
+j4a issues list --resolution unresolved --reporter me --label agent --component API
+j4a issues list --sprint active --created -7d --updated 'startOfWeek()'
 j4a issues show OPS-42
 j4a search 'project = OPS AND assignee = currentUser() ORDER BY updated DESC'
 
-j4a issues create --project OPS --type Bug --summary "Broken deployment"
-j4a issues update OPS-42 --priority High --field story-points=5
+j4a issues create --project OPS --type Bug --summary "Broken deployment" \
+  --parent OPS-10 --component API --fix-version 4.5 --sprint active
+j4a issues update OPS-42 --priority High --component API --fix-version 4.5
+j4a issues update OPS-42 --component none  # clear all components
 j4a issues comment OPS-42 --body "Deployed to staging."
 j4a issues transition OPS-42 --to "In Review"
+j4a issues assign OPS-42 --assignee me
+j4a issues move OPS-42 --sprint active
+
+j4a issues link OPS-42 --to OPS-99 --type Blocks
+j4a issues links OPS-42
+j4a issues unlink 10001
 
 j4a projects list
 j4a fields list --custom
 j4a cache fields refresh
+```
+
+Issue list filters are combined with `AND`; repeated `--label`, `--component`,
+and `--fix-version` values use JQL `IN`. `--resolution unresolved` means no
+resolution; `--assignee me` and `--reporter me` use Jira's `currentUser()`.
+For `issues list`, Sprint accepts `active`/`open`, `closed`, `future`, an ID,
+or a name. An
+absolute `--created`/`--updated` date (`YYYY-MM-DD` or `YYYY/MM/DD`) selects
+that whole day; relative values such as `-7d` and allowlisted Jira date
+functions such as `startOfWeek()` select values on or after that operand.
+
+`issues create --sprint` creates the issue first and then moves it; a failed
+move never deletes the newly created issue. `issues update --component` and
+`--fix-version` replace the full field, while a single `none` clears it.
+Write-time Sprint specs accept a numeric ID, `active`, or a case-insensitive
+name substring and use the first match in Jira board/page order.
+
+Use JQL-only selection for bulk operations. Exactly one of `--dry-run` and
+`--yes` is required; `--dry-run` preflights every matching issue, while
+`--yes` performs serial writes without prompting. Bulk commands page through
+all matches by default.
+
+```sh
+j4a issues bulk-transition --jql 'project = OPS AND status = Open' --to "In Progress" --dry-run
+j4a issues bulk-assign --jql 'project = OPS' --assignee me --yes
 ```
 
 ## Shell completion
@@ -217,7 +252,16 @@ warnings without changing the exit code:
 Successful data is written to stdout. In JSON mode, structured failures are
 written to stderr and paired with stable exit codes. Human-readable warnings
 are written to stderr. `--raw` bypasses j4a's schema and emits the Jira REST
-response unchanged.
+response unchanged. For a partial result (exit code `7`), j4a first writes the
+complete normalized result to stdout, then writes a structured
+`partial_failure` error to stderr. This includes a successful issue creation
+whose requested Sprint move failed and bulk runs with failed or unattempted
+items.
+
+`--raw` is unavailable for `issues create --sprint`, `issues bulk-transition`,
+and `issues bulk-assign`; these composite commands must retain normalized
+partial-result behavior. Single-request issue actions retain their raw Jira
+REST response behavior.
 
 `j4a schema` describes automation-facing Jira commands, flags, mutation
 status, output shapes, and exit codes as machine-readable JSON. Shell

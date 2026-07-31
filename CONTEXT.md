@@ -51,3 +51,19 @@ _Avoid_: Jira Markdown, wiki Markdown
 **Markdown Input**:
 CommonMark-compatible text that j4a converts to Jira Markup only when explicitly requested.
 _Avoid_: Jira Markup
+
+**Sprint**:
+A Jira Software planning interval that groups Issues for a time-bounded body of work.
+_Avoid_: Iteration, milestone
+
+**Issue Link**:
+A directional relationship between two Jira Issues, identified by Jira so it can be listed and removed deterministically.
+_Avoid_: Web Link, dependency
+
+**Link Type**:
+A Jira-owned definition that names an Issue Link and its inward and outward relationship descriptions.
+_Avoid_: Relationship type, link name
+
+**Bulk Operation**:
+One requested action applied by j4a to every Issue selected by JQL, with an ordered outcome recorded for each Issue.
+_Avoid_: Transaction, batch endpoint

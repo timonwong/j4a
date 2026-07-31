@@ -57,6 +57,15 @@ host = "https://alpha.example"
 		{"profiles", []string{"__complete", "--config", path, "--profile", ""}, []string{"alpha", "zeta", ":4"}},
 		{"input format", []string{"__complete", "issues", "create", "--input-format", ""}, []string{"jira\tJira wiki markup", "markdown\tConvert Markdown to Jira markup", ":4"}},
 		{"assignee", []string{"__complete", "issues", "list", "--assignee", ""}, []string{"me\tUse Jira currentUser()", ":4"}},
+		{"issue list fixed filters", []string{"__complete", "issues", "list", "--sprint", ""}, []string{"active\tOpen sprints", "open\tOpen sprints", "closed\tClosed sprints", "future\tFuture sprints", ":4"}},
+		{"issue list resolution", []string{"__complete", "issues", "list", "--resolution", ""}, []string{"unresolved\tIssues without a resolution", ":4"}},
+		{"issue list reporter", []string{"__complete", "issues", "list", "--reporter", ""}, []string{"me\tUse Jira currentUser()", ":4"}},
+		{"issue create sprint", []string{"__complete", "issues", "create", "--sprint", ""}, []string{"active\tOpen sprint", ":4"}},
+		{"issue assign", []string{"__complete", "issues", "assign", "OPS-1", "--assignee", ""}, []string{"me\tAssign to the current Jira user", "none\tClear the assignee", ":4"}},
+		{"issue move", []string{"__complete", "issues", "move", "OPS-1", "--sprint", ""}, []string{"active\tOpen sprint", ":4"}},
+		{"issue update clear named fields", []string{"__complete", "issues", "update", "OPS-1", "--component", ""}, []string{"none\tClear all components", ":4"}},
+		{"issue update clear fix versions", []string{"__complete", "issues", "update", "OPS-1", "--fix-version", ""}, []string{"none\tClear all fix versions", ":4"}},
+		{"bulk assign", []string{"__complete", "issues", "bulk-assign", "--assignee", ""}, []string{"me\tAssign to the current Jira user", "none\tClear the assignee", ":4"}},
 		{"file or stdin", []string{"__complete", "issues", "comment", "OPS-1", "--body-file", ""}, []string{"-\tRead from stdin", ":0"}},
 	}
 	for _, test := range tests {

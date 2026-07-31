@@ -24,15 +24,24 @@ func (a *app) issuesCommand() *cobra.Command {
 		a.issueCommentCommand(),
 		a.issueTransitionsCommand(),
 		a.issueTransitionCommand(),
+		a.issueAssignCommand(),
+		a.issueMoveCommand(),
+		a.issueLinksCommand(),
+		a.issueLinkCommand(),
+		a.issueUnlinkCommand(),
+		a.issueLinkTypesCommand(),
+		a.issueBulkTransitionCommand(),
+		a.issueBulkAssignCommand(),
 	)
 	return command
 }
 
 func (a *app) issuesListCommand() *cobra.Command {
 	var project, status, assignee, issueType, rawJQL string
+	var resolution, reporter, sprint, parent, created, updated string
 	var limit, offset int
 	var all bool
-	var fields []string
+	var fields, labels, components, fixVersions []string
 	command := &cobra.Command{
 		Use:   "list",
 		Short: "List issues",
@@ -45,7 +54,17 @@ func (a *app) issuesListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			jql := buildIssueJQL(rawJQL, project, status, assignee, issueType)
+			jql, err := BuildIssueJQL(IssueListJQLOptions{
+				RawJQL: rawJQL,
+				Filters: IssueListJQLFilters{
+					Project: project, Status: status, Assignee: assignee, IssueType: issueType,
+					Resolution: resolution, Reporter: reporter, Labels: labels, Components: components,
+					FixVersions: fixVersions, Sprint: sprint, Parent: parent, Created: created, Updated: updated,
+				},
+			})
+			if err != nil {
+				return err
+			}
 			if isRaw(a) {
 				if all {
 					return apperr.New(apperr.KindInvalidInput, "--all cannot be combined with --raw")
@@ -75,6 +94,15 @@ func (a *app) issuesListCommand() *cobra.Command {
 	flags.StringVar(&status, "status", "", "filter by status")
 	flags.StringVar(&assignee, "assignee", "", "filter by assignee; use me for currentUser()")
 	flags.StringVarP(&issueType, "type", "t", "", "filter by issue type")
+	flags.StringVar(&resolution, "resolution", "", "filter by resolution; use unresolved for empty resolution")
+	flags.StringVar(&reporter, "reporter", "", "filter by reporter; use me for currentUser()")
+	flags.StringSliceVar(&labels, "label", nil, "filter by label; repeatable")
+	flags.StringSliceVar(&components, "component", nil, "filter by component name; repeatable")
+	flags.StringSliceVar(&fixVersions, "fix-version", nil, "filter by fix version name; repeatable")
+	flags.StringVar(&sprint, "sprint", "", "filter by sprint ID, name, active/open, closed, or future")
+	flags.StringVar(&parent, "parent", "", "filter by parent issue key")
+	flags.StringVar(&created, "created", "", "filter by Jira absolute or relative created date")
+	flags.StringVar(&updated, "updated", "", "filter by Jira absolute or relative updated date")
 	flags.StringVarP(&rawJQL, "jql", "q", "", "additional raw JQL expression")
 	flags.IntVarP(&limit, "limit", "n", 50, "maximum issues per page")
 	flags.IntVar(&offset, "offset", 0, "zero-based result offset")
@@ -113,9 +141,9 @@ func (a *app) issueShowCommand() *cobra.Command {
 }
 
 func (a *app) issueCreateCommand() *cobra.Command {
-	var project, issueType, summary, description, descriptionFile, inputFormat string
+	var project, issueType, summary, description, descriptionFile, inputFormat, parent, sprint string
 	var priority, assignee string
-	var labels, fields []string
+	var labels, components, fixVersions, fields []string
 	command := &cobra.Command{
 		Use:   "create",
 		Short: "Create an issue",
@@ -123,6 +151,9 @@ func (a *app) issueCreateCommand() *cobra.Command {
 		RunE: func(command *cobra.Command, _ []string) error {
 			if strings.TrimSpace(project) == "" || strings.TrimSpace(issueType) == "" || strings.TrimSpace(summary) == "" {
 				return apperr.New(apperr.KindInvalidInput, "project, type, and summary are required")
+			}
+			if strings.TrimSpace(sprint) != "" && isRaw(a) {
+				return apperr.New(apperr.KindInvalidInput, "--raw is not available for issues create --sprint")
 			}
 			client, settings, err := a.writableClient()
 			if err != nil {
@@ -145,6 +176,11 @@ func (a *app) issueCreateCommand() *cobra.Command {
 				return err
 			}
 			applyStandardFields(resolvedFields, priority, assignee, labels, command.Flags().Changed("label"))
+			if strings.TrimSpace(parent) != "" {
+				resolvedFields["parent"] = map[string]string{"key": parent}
+			}
+			applyNamedIssueField(resolvedFields, "components", components, len(components) > 0, false)
+			applyNamedIssueField(resolvedFields, "fixVersions", fixVersions, len(fixVersions) > 0, false)
 			input := jira.CreateIssueInput{
 				ProjectKey: project, IssueType: issueType, Summary: summary,
 				Description: descriptionValue, Fields: resolvedFields,
@@ -156,7 +192,18 @@ func (a *app) issueCreateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result := map[string]string{"id": issue.ID, "key": issue.Key}
+			result := map[string]any{"id": issue.ID, "key": issue.Key}
+			if strings.TrimSpace(sprint) != "" {
+				result["sprint"] = sprint
+				if err := client.MoveIssueToSprint(command.Context(), issue.Key, jira.MoveIssueToSprintInput{Sprint: sprint}); err != nil {
+					result["sprintMoved"] = false
+					if renderErr := a.renderPartial(result, "Created "+issue.Key); renderErr != nil {
+						return renderErr
+					}
+					return apperr.Wrap(apperr.KindPartialFailure, err, "created %s but failed to move it to sprint %q: %v", issue.Key, sprint, err)
+				}
+				result["sprintMoved"] = true
+			}
 			return a.renderMessage(result, "Created "+issue.Key)
 		},
 	}
@@ -170,6 +217,10 @@ func (a *app) issueCreateCommand() *cobra.Command {
 	flags.StringVar(&priority, "priority", "", "priority name")
 	flags.StringVar(&assignee, "assignee", "", "assignee username; use none to clear")
 	flags.StringSliceVar(&labels, "label", nil, "label; repeat or pass comma-separated values")
+	flags.StringVar(&parent, "parent", "", "parent issue key")
+	flags.StringSliceVar(&components, "component", nil, "component name; repeatable")
+	flags.StringSliceVar(&fixVersions, "fix-version", nil, "fix version name; repeatable")
+	flags.StringVar(&sprint, "sprint", "", "sprint ID, name substring, or active")
 	flags.StringArrayVar(&fields, "field", nil, "custom field as key=value; repeatable")
 	return command
 }
@@ -177,7 +228,7 @@ func (a *app) issueCreateCommand() *cobra.Command {
 func (a *app) issueUpdateCommand() *cobra.Command {
 	var summary, description, descriptionFile, inputFormat string
 	var priority, assignee string
-	var labels, fields []string
+	var labels, components, fixVersions, fields []string
 	command := &cobra.Command{
 		Use:   "update ISSUE-KEY",
 		Short: "Update an issue",
@@ -204,6 +255,8 @@ func (a *app) issueUpdateCommand() *cobra.Command {
 				return err
 			}
 			applyStandardFields(resolvedFields, priority, assignee, labels, command.Flags().Changed("label"))
+			applyNamedIssueField(resolvedFields, "components", components, command.Flags().Changed("component"), true)
+			applyNamedIssueField(resolvedFields, "fixVersions", fixVersions, command.Flags().Changed("fix-version"), true)
 			input := jira.UpdateIssueInput{Description: descriptionValue, Fields: resolvedFields}
 			if command.Flags().Changed("summary") {
 				input.Summary = &summary
@@ -229,6 +282,8 @@ func (a *app) issueUpdateCommand() *cobra.Command {
 	flags.StringVar(&priority, "priority", "", "priority name")
 	flags.StringVar(&assignee, "assignee", "", "assignee username; use none to clear")
 	flags.StringSliceVar(&labels, "label", nil, "replacement labels; repeat or pass comma-separated values")
+	flags.StringSliceVar(&components, "component", nil, "replacement component names; use a single none to clear")
+	flags.StringSliceVar(&fixVersions, "fix-version", nil, "replacement fix version names; use a single none to clear")
 	flags.StringArrayVar(&fields, "field", nil, "custom field as key=value; repeatable")
 	return command
 }
@@ -449,8 +504,23 @@ func applyStandardFields(fields map[string]any, priority, assignee string, label
 	}
 }
 
+func applyNamedIssueField(fields map[string]any, key string, values []string, changed, allowClear bool) {
+	if !changed {
+		return
+	}
+	if allowClear && len(values) == 1 && strings.EqualFold(strings.TrimSpace(values[0]), "none") {
+		fields[key] = []map[string]string{}
+		return
+	}
+	named := make([]map[string]string, 0, len(values))
+	for _, value := range values {
+		named = append(named, map[string]string{"name": value})
+	}
+	fields[key] = named
+}
+
 func issueTable(issue jira.Issue) output.Table {
-	status, issueType, priority, assignee, reporter := "", "", "", "", ""
+	status, issueType, priority, assignee, reporter, parent := "", "", "", "", "", ""
 	if issue.Status != nil {
 		status = issue.Status.Name
 	}
@@ -466,10 +536,22 @@ func issueTable(issue jira.Issue) output.Table {
 	if issue.Reporter != nil {
 		reporter = issue.Reporter.DisplayName
 	}
+	if issue.Parent != nil {
+		parent = issue.Parent.Key
+	}
+	components := make([]string, 0, len(issue.Components))
+	for _, component := range issue.Components {
+		components = append(components, component.Name)
+	}
+	fixVersions := make([]string, 0, len(issue.FixVersions))
+	for _, version := range issue.FixVersions {
+		fixVersions = append(fixVersions, version.Name)
+	}
 	rows := [][]string{
 		{"Key", issue.Key}, {"Summary", issue.Summary}, {"Status", status},
 		{"Type", issueType}, {"Priority", priority}, {"Assignee", assignee},
 		{"Reporter", reporter}, {"Labels", joinNames(issue.Labels)},
+		{"Parent", parent}, {"Components", joinNames(components)}, {"Fix Versions", joinNames(fixVersions)},
 		{"Description", issue.Description},
 	}
 	return output.Table{Headers: []string{"FIELD", "VALUE"}, Rows: rows}
@@ -478,7 +560,11 @@ func issueTable(issue jira.Issue) output.Table {
 func matchTransition(target string, transitions []jira.Transition) (jira.Transition, error) {
 	matches := make([]jira.Transition, 0, 1)
 	for _, transition := range transitions {
-		if transition.ID == target || strings.EqualFold(transition.Name, target) {
+		matchesTarget := transition.ID == target || strings.EqualFold(transition.Name, target)
+		if transition.To != nil && strings.EqualFold(transition.To.Name, target) {
+			matchesTarget = true
+		}
+		if matchesTarget {
 			matches = append(matches, transition)
 		}
 	}

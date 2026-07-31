@@ -9,13 +9,14 @@ import (
 type Kind string
 
 const (
-	KindUnexpected   Kind = "unexpected"
-	KindInvalidInput Kind = "invalid_input"
-	KindConfig       Kind = "config"
-	KindAuth         Kind = "auth"
-	KindNotFound     Kind = "not_found"
-	KindAPI          Kind = "api_error"
-	KindRateLimit    Kind = "rate_limit"
+	KindUnexpected     Kind = "unexpected"
+	KindInvalidInput   Kind = "invalid_input"
+	KindConfig         Kind = "config"
+	KindAuth           Kind = "auth"
+	KindNotFound       Kind = "not_found"
+	KindAPI            Kind = "api_error"
+	KindRateLimit      Kind = "rate_limit"
+	KindPartialFailure Kind = "partial_failure"
 )
 
 // Error carries a stable error category while preserving the underlying cause.
@@ -73,6 +74,8 @@ func ExitCode(err error) int {
 		return 5
 	case KindRateLimit:
 		return 6
+	case KindPartialFailure:
+		return 7
 	default:
 		return 1
 	}
