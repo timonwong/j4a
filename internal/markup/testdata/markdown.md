@@ -1,6 +1,0 @@
-# Release
-
-* one
-* two
-
-`jiro`

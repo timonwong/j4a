@@ -3,10 +3,9 @@ module github.com/timonwong/jiro
 go 1.26.0
 
 require (
-	github.com/kentaro-m/blackfriday-confluence v0.0.0-20220126124413-8e85477b49b3
 	github.com/pelletier/go-toml/v2 v2.4.3
-	github.com/russross/blackfriday/v2 v2.1.0
 	github.com/spf13/cobra v1.10.2
+	github.com/yuin/goldmark v1.8.5
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/term v0.45.0
 )
