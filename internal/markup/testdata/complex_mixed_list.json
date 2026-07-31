@@ -1,4 +1,4 @@
 {
-  "input": "3. deploy\n   - linux\n     1. amd64\n     2. arm64\n   - mac\n4. verify\n   1. smoke\n      - [x] cli\n      - [ ] api",
+  "input": "3. deploy\n   - linux\n     7. amd64\n     8. arm64\n   - mac\n4. verify\n   5. smoke\n      - [x] cli\n      - [ ] api",
   "want": "# deploy\n#* linux\n#*# amd64\n#*# arm64\n#* mac\n# verify\n## smoke\n##* \\[x\\] cli\n##* \\[ \\] api"
 }

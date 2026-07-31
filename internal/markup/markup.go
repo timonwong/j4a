@@ -4,6 +4,7 @@ package markup
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	extensionast "github.com/yuin/goldmark/extension/ast"
+	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
 )
@@ -53,13 +55,80 @@ func ToJira(input string, format InputFormat) (string, error) {
 	}
 
 	source := []byte(input)
-	parser := goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough))
-	document := parser.Parser().Parse(text.NewReader(source))
+	markdownParser := goldmark.New(
+		goldmark.WithExtensions(extension.Table, extension.Strikethrough),
+		goldmark.WithParserOptions(parser.WithBlockParsers(
+			util.Prioritized(newOrderedListInterruptParser(), 299),
+		)),
+	)
+	document := markdownParser.Parser().Parse(text.NewReader(source))
 	result, err := jiraMarkupRenderer{source: source}.renderDocument(document)
 	if err != nil {
 		return "", err
 	}
 	return result, nil
+}
+
+type orderedListInterruptParser struct {
+	parser.BlockParser
+}
+
+// Goldmark follows CommonMark's start-at-one restriction when an ordered list
+// interrupts a paragraph. Markdown Input deliberately accepts any authored
+// start value there because Jira Markup normalizes ordered markers to one.
+func newOrderedListInterruptParser() parser.BlockParser {
+	return &orderedListInterruptParser{BlockParser: parser.NewListParser()}
+}
+
+func (p *orderedListInterruptParser) Trigger() []byte {
+	return []byte{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'}
+}
+
+func (p *orderedListInterruptParser) Open(parent ast.Node, reader text.Reader, context parser.Context) (ast.Node, parser.State) {
+	last := context.LastOpenedBlock().Node
+	if !ast.IsParagraph(last) || last.Parent() != parent {
+		return nil, parser.NoChildren
+	}
+	line, _ := reader.PeekLine()
+	marker, start, ok := parseNonOneOrderedListItem(line)
+	if !ok {
+		return nil, parser.NoChildren
+	}
+	list := ast.NewList(marker)
+	list.Start = start
+	return list, parser.HasChildren
+}
+
+func parseNonOneOrderedListItem(line []byte) (byte, int, bool) {
+	index := 0
+	for index < len(line) && line[index] == ' ' {
+		index++
+	}
+	if index > 3 {
+		return 0, 0, false
+	}
+	numberStart := index
+	for index < len(line) && util.IsNumeric(line[index]) {
+		index++
+	}
+	if index == numberStart || index-numberStart > 9 || index >= len(line) ||
+		(line[index] != '.' && line[index] != ')') {
+		return 0, 0, false
+	}
+	marker := line[index]
+	start, err := strconv.Atoi(string(line[numberStart:index]))
+	if err != nil || start == 1 {
+		return 0, 0, false
+	}
+	index++
+	if index >= len(line) || line[index] == '\n' || util.IsBlank(line[index:]) {
+		return 0, 0, false
+	}
+	indent, _ := util.IndentWidth(line[index:], 0)
+	if indent == 0 {
+		return 0, 0, false
+	}
+	return marker, start, true
 }
 
 type jiraMarkupRenderer struct {

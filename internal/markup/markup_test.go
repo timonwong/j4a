@@ -135,7 +135,7 @@ func TestToJiraConvertsInitialMarkdownInputTracer(t *testing.T) {
 
 func TestToJiraPreservesTightNestedListOwnershipAndOrder(t *testing.T) {
 	t.Parallel()
-	input := "- alpha\n  1. first\n     - leaf\n  2. second\n- omega"
+	input := "- alpha\n  7. first\n     - leaf\n  8. second\n- omega"
 	want := "* alpha\n*# first\n*#* leaf\n*# second\n* omega"
 
 	got, err := ToJira(input, Markdown)
@@ -163,13 +163,10 @@ func TestToJiraPreservesNestedListOwnedByEmptyParentItem(t *testing.T) {
 
 func TestToJiraNormalizesOrderedListStartValue(t *testing.T) {
 	t.Parallel()
-	got, err := ToJira("7. seven\n8. eight", Markdown)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := "# seven\n# eight"; got != want {
-		t.Fatalf("ToJira() = %q, want %q", got, want)
-	}
+	assertMarkdownConversions(t, []markdownConversionCase{
+		{name: "dot marker interrupts paragraph", input: "intro\n7. seven\n8. eight", want: "intro\n\n# seven\n# eight"},
+		{name: "parenthesis marker interrupts paragraph", input: "intro\n3) three\n4) four", want: "intro\n\n# three\n# four"},
+	})
 }
 
 func TestToJiraPreservesFormattedBlockquoteParagraphs(t *testing.T) {
