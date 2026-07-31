@@ -461,6 +461,8 @@ func TestToJiraRejectsNonParagraphBlocksInsideBlockquotes(t *testing.T) {
 		{name: "fenced code", input: "> ```go\n> code\n> ```", line: 1, column: 3, nodeType: "FencedCodeBlock"},
 		{name: "indented code", input: ">     code", line: 1, column: 7, nodeType: "CodeBlock"},
 		{name: "heading", input: "> # heading", line: 1, column: 3, nodeType: "Heading"},
+		{name: "thematic break", input: "> ---", line: 1, column: 3, nodeType: "ThematicBreak"},
+		{name: "HTML block", input: "> <div>\n> content\n> </div>", line: 1, column: 3, nodeType: "HTMLBlock"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
