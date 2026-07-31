@@ -47,20 +47,24 @@ func TestJSONOutputAndBasicAuth(t *testing.T) {
 	defer server.Close()
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "-ojson", "myself"}, strings.NewReader(""), stdout, stderr)
+	code := Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "-ojson", "auth", "status"}, strings.NewReader(""), stdout, stderr)
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	var envelope struct {
 		SchemaVersion string `json:"schemaVersion"`
 		Data          struct {
-			Username string `json:"username"`
+			Profile  string `json:"profile"`
+			Instance string `json:"instance"`
+			User     struct {
+				Username string `json:"username"`
+			} `json:"user"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.SchemaVersion != "1" || envelope.Data.Username != "alice" {
+	if envelope.SchemaVersion != "1" || envelope.Data.Profile != "default" || envelope.Data.Instance != server.URL || envelope.Data.User.Username != "alice" {
 		t.Fatalf("envelope = %+v", envelope)
 	}
 }
@@ -101,7 +105,7 @@ func TestJSONErrorUsesStderrAndExitCode(t *testing.T) {
 	defer server.Close()
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "-ojson", "myself"}, strings.NewReader(""), stdout, stderr)
+	code := Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "-ojson", "auth", "status"}, strings.NewReader(""), stdout, stderr)
 	if code != 3 || stdout.Len() != 0 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -277,7 +281,7 @@ func TestRawAndSchema(t *testing.T) {
 	defer server.Close()
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "--raw", "myself"}, strings.NewReader(""), stdout, stderr)
+	code := Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "--raw", "issues", "show", "OPS-1"}, strings.NewReader(""), stdout, stderr)
 	if code != 0 || stdout.String() != `{"raw":true}` || stderr.Len() != 0 {
 		t.Fatalf("raw code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -400,7 +404,7 @@ func TestRawAndSchema(t *testing.T) {
 	if metadata, ok := commands["auth status"]; !ok || !metadata.auth || metadata.mutating {
 		t.Fatalf("auth status schema = %+v, present=%t", metadata, ok)
 	}
-	for _, name := range []string{"login", "logout"} {
+	for _, name := range []string{"login", "logout", "myself"} {
 		if _, ok := commands[name]; ok {
 			t.Fatalf("removed top-level command remains in schema: %q", name)
 		}
@@ -483,7 +487,7 @@ func TestInvalidOutputFailsBeforeNetwork(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	defer server.Close()
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "--output=raw", "myself"}, strings.NewReader(""), stdout, stderr)
+	code := Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "--output=raw", "auth", "status"}, strings.NewReader(""), stdout, stderr)
 	if code != 2 || calls.Load() != 0 {
 		t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls.Load(), stdout.String(), stderr.String())
 	}

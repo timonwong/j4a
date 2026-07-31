@@ -482,7 +482,7 @@ func TestAuthCommandsOnlyAvailableUnderAuth(t *testing.T) {
 	if code := Execute([]string{"--help"}, strings.NewReader(""), stdout, stderr); code != 0 || stderr.Len() != 0 {
 		t.Fatalf("root help code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "  auth ") || strings.Contains(stdout.String(), "\n  login ") || strings.Contains(stdout.String(), "\n  logout ") {
+	if !strings.Contains(stdout.String(), "  auth ") || strings.Contains(stdout.String(), "\n  login ") || strings.Contains(stdout.String(), "\n  logout ") || strings.Contains(stdout.String(), "\n  myself ") {
 		t.Fatalf("root help exposes wrong auth commands:\n%s", stdout.String())
 	}
 
@@ -497,11 +497,16 @@ func TestAuthCommandsOnlyAvailableUnderAuth(t *testing.T) {
 		}
 	}
 
-	for _, command := range []string{"login", "logout"} {
+	for _, command := range []string{"login", "logout", "myself"} {
 		stdout.Reset()
 		stderr.Reset()
 		if code := Execute([]string{command}, strings.NewReader(""), stdout, stderr); code != 1 || !strings.Contains(stderr.String(), "unknown command") {
 			t.Fatalf("top-level %s code=%d stdout=%s stderr=%s", command, code, stdout.String(), stderr.String())
+		}
+	}
+	for _, command := range schemaDocument().Commands {
+		if command.Name == "myself" {
+			t.Fatalf("removed myself command remains in schema: %+v", command)
 		}
 	}
 }
