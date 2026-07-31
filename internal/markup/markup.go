@@ -66,6 +66,11 @@ type jiraMarkupRenderer struct {
 	source []byte
 }
 
+const (
+	listItemBlockReason   = "list items may contain only text and nested lists"
+	blockquoteBlockReason = "blockquotes may contain only paragraphs"
+)
+
 func (r jiraMarkupRenderer) renderDocument(document ast.Node) (string, error) {
 	blocks := make([]string, 0, document.ChildCount())
 	for node := document.FirstChild(); node != nil; node = node.NextSibling() {
@@ -93,7 +98,9 @@ func (r jiraMarkupRenderer) renderBlock(node ast.Node) (string, error) {
 		}
 		return heading, nil
 	case *ast.List:
-		return r.renderSimpleList(typed)
+		return r.renderList(typed, "")
+	case *ast.Blockquote:
+		return r.renderBlockquote(typed)
 	case *ast.ThematicBreak:
 		return "----", nil
 	case *ast.HTMLBlock:
@@ -103,35 +110,70 @@ func (r jiraMarkupRenderer) renderBlock(node ast.Node) (string, error) {
 	}
 }
 
-func (r jiraMarkupRenderer) renderSimpleList(list *ast.List) (string, error) {
+func (r jiraMarkupRenderer) renderBlockquote(blockquote *ast.Blockquote) (string, error) {
+	paragraphs := make([]string, 0, blockquote.ChildCount())
+	for child := blockquote.FirstChild(); child != nil; child = child.NextSibling() {
+		paragraph, ok := child.(*ast.Paragraph)
+		if !ok {
+			return "", r.conversionError(child, blockquoteBlockReason)
+		}
+		content, err := r.renderInlines(paragraph, true)
+		if err != nil {
+			return "", err
+		}
+		paragraphs = append(paragraphs, content)
+	}
+	return "{quote}\n" + strings.Join(paragraphs, "\n\n") + "\n{quote}", nil
+}
+
+func (r jiraMarkupRenderer) renderList(list *ast.List, parentMarkers string) (string, error) {
 	if !list.IsTight {
-		return "", r.unsupported(list)
+		return "", r.conversionError(list, "loose list items with multiple blocks are not supported")
 	}
-	marker := "*"
+	marker := parentMarkers + "*"
 	if list.IsOrdered() {
-		marker = "#"
+		marker = parentMarkers + "#"
 	}
-	items := make([]string, 0, list.ChildCount())
+	lines := make([]string, 0, list.ChildCount())
 	for child := list.FirstChild(); child != nil; child = child.NextSibling() {
 		item, ok := child.(*ast.ListItem)
-		if !ok || item.ChildCount() != 1 {
-			return "", r.unsupported(list)
-		}
-		textBlock, ok := item.FirstChild().(*ast.TextBlock)
 		if !ok {
 			return "", r.unsupported(list)
 		}
-		content, err := r.renderInlines(textBlock, false)
-		if err != nil {
-			return "", err
+		var content string
+		var nestedStart ast.Node
+		switch firstBlock := item.FirstChild().(type) {
+		case *ast.TextBlock:
+			var err error
+			content, err = r.renderInlines(firstBlock, false)
+			if err != nil {
+				return "", err
+			}
+			nestedStart = firstBlock.NextSibling()
+		case *ast.List:
+			nestedStart = firstBlock
+		case nil:
+		default:
+			return "", r.conversionError(firstBlock, listItemBlockReason)
 		}
 		itemMarkup := marker
 		if content != "" {
 			itemMarkup += " " + content
 		}
-		items = append(items, itemMarkup)
+		lines = append(lines, itemMarkup)
+		for block := nestedStart; block != nil; block = block.NextSibling() {
+			nestedList, ok := block.(*ast.List)
+			if !ok {
+				return "", r.conversionError(block, listItemBlockReason)
+			}
+			nestedMarkup, err := r.renderList(nestedList, marker)
+			if err != nil {
+				return "", err
+			}
+			lines = append(lines, nestedMarkup)
+		}
 	}
-	return strings.Join(items, "\n"), nil
+	return strings.Join(lines, "\n"), nil
 }
 
 func (r jiraMarkupRenderer) renderInlines(parent ast.Node, atLineStart bool) (string, error) {
@@ -261,12 +303,16 @@ func (r jiraMarkupRenderer) renderCodeSpan(code *ast.CodeSpan) (string, error) {
 }
 
 func (r jiraMarkupRenderer) unsupported(node ast.Node) *ConversionError {
+	return r.conversionError(node, "unsupported Markdown Input syntax")
+}
+
+func (r jiraMarkupRenderer) conversionError(node ast.Node, reason string) *ConversionError {
 	line, column := sourcePosition(r.source, node)
 	return &ConversionError{
 		Line:     line,
 		Column:   column,
 		NodeType: node.Kind().String(),
-		Reason:   "unsupported Markdown Input syntax",
+		Reason:   reason,
 	}
 }
 

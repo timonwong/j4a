@@ -177,19 +177,19 @@ func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing
 			name: "issue create",
 			args: []string{
 				"issues", "create", "--project", "OPS", "--type", "Story", "--summary", "Unsupported input",
-				"--description", "> quote", "--input-format=markdown", "--field", "story-points=5",
+				"--description", "```go\ncode\n```", "--input-format=markdown", "--field", "story-points=5",
 			},
 		},
 		{
 			name: "issue update",
 			args: []string{
-				"issues", "update", "OPS-1", "--description", "> quote", "--input-format=markdown",
+				"issues", "update", "OPS-1", "--description", "```go\ncode\n```", "--input-format=markdown",
 				"--field", "story-points=5",
 			},
 		},
 		{
 			name: "issue comment",
-			args: []string{"issues", "comment", "OPS-1", "--body", "> quote", "--input-format=markdown"},
+			args: []string{"issues", "comment", "OPS-1", "--body", "```go\ncode\n```", "--input-format=markdown"},
 		},
 	}
 	for _, test := range tests {
@@ -213,7 +213,7 @@ func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing
 			}
 			if envelope.SchemaVersion != "1" || envelope.Error.Kind != "invalid_input" ||
 				!strings.Contains(envelope.Error.Message, "line 1, column 1") ||
-				!strings.Contains(envelope.Error.Message, "Blockquote") ||
+				!strings.Contains(envelope.Error.Message, "FencedCodeBlock") ||
 				!strings.Contains(envelope.Error.Message, "unsupported Markdown Input syntax") {
 				t.Fatalf("error envelope = %+v", envelope)
 			}

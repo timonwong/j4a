@@ -1,0 +1,4 @@
+{
+  "input": "> **Quoted _format_**\n>\n> h2. authored\n>\n> ~~done~~ and `code`",
+  "want": "{quote}\n*Quoted _format_*\n\nh2\\. authored\n\n-done- and {{code}}\n{quote}"
+}
