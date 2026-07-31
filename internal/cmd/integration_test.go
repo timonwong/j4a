@@ -169,6 +169,22 @@ func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing
 	defer server.Close()
 	configPath := writeCLIConfig(t, server.URL, false)
 	unsupportedTableCell := "| H |\n| --- |\n| ![alt](image.png) |"
+	errorMessage := "convert Markdown Input: Markdown Input conversion failed at line 3, column 3 (Image): images are not supported in table cells"
+	outputs := []struct {
+		name string
+		arg  string
+		want string
+	}{
+		{
+			name: "stable JSON envelope",
+			arg:  "-ojson",
+			want: `{"schemaVersion":"1","error":{"kind":"invalid_input","message":"` + errorMessage + `"}}` + "\n",
+		},
+		{
+			name: "readable text error",
+			want: errorMessage + "\n",
+		},
+	}
 
 	tests := []struct {
 		name string
@@ -194,31 +210,24 @@ func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing
 		},
 	}
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			calls.Store(0)
-			stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-			args := append([]string{"--config", configPath, "-ojson"}, test.args...)
-			code := Execute(args, strings.NewReader(""), stdout, stderr)
-			if code != 2 || stdout.Len() != 0 || calls.Load() != 0 {
-				t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls.Load(), stdout.String(), stderr.String())
-			}
-			var envelope struct {
-				SchemaVersion string `json:"schemaVersion"`
-				Error         struct {
-					Kind    string `json:"kind"`
-					Message string `json:"message"`
-				} `json:"error"`
-			}
-			if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
-				t.Fatal(err)
-			}
-			if envelope.SchemaVersion != "1" || envelope.Error.Kind != "invalid_input" ||
-				!strings.Contains(envelope.Error.Message, "line 3, column 3") ||
-				!strings.Contains(envelope.Error.Message, "Image") ||
-				!strings.Contains(envelope.Error.Message, "images are not supported in table cells") {
-				t.Fatalf("error envelope = %+v", envelope)
-			}
-		})
+		for _, output := range outputs {
+			t.Run(test.name+"/"+output.name, func(t *testing.T) {
+				calls.Store(0)
+				stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+				args := []string{"--config", configPath}
+				if output.arg != "" {
+					args = append(args, output.arg)
+				}
+				args = append(args, test.args...)
+				code := Execute(args, strings.NewReader(""), stdout, stderr)
+				if code != 2 || stdout.Len() != 0 || calls.Load() != 0 {
+					t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls.Load(), stdout.String(), stderr.String())
+				}
+				if stderr.String() != output.want {
+					t.Fatalf("stderr = %q, want %q", stderr.String(), output.want)
+				}
+			})
+		}
 	}
 }
 
@@ -297,8 +306,10 @@ func TestRawAndSchema(t *testing.T) {
 				JSONData map[string]any `json:"jsonData"`
 				Flags    []struct {
 					Name       string `json:"name"`
+					Type       string `json:"type"`
 					Repeatable bool   `json:"repeatable"`
 					Required   bool   `json:"required"`
+					Default    any    `json:"default"`
 				} `json:"flags"`
 			} `json:"commands"`
 		} `json:"data"`
@@ -325,22 +336,33 @@ func TestRawAndSchema(t *testing.T) {
 		auth, mutating bool
 	})
 	flags := make(map[string]map[string]struct {
-		repeatable bool
-		required   bool
+		repeatable   bool
+		required     bool
+		kind         string
+		defaultValue any
 	})
 	for _, command := range envelope.Data.Commands {
 		commands[command.Name] = struct {
 			auth, mutating bool
 		}{command.Auth, command.Mutating}
 		flags[command.Name] = make(map[string]struct {
-			repeatable bool
-			required   bool
+			repeatable   bool
+			required     bool
+			kind         string
+			defaultValue any
 		}, len(command.Flags))
 		for _, flag := range command.Flags {
 			flags[command.Name][flag.Name] = struct {
-				repeatable bool
-				required   bool
-			}{flag.Repeatable, flag.Required}
+				repeatable   bool
+				required     bool
+				kind         string
+				defaultValue any
+			}{
+				repeatable:   flag.Repeatable,
+				required:     flag.Required,
+				kind:         flag.Type,
+				defaultValue: flag.Default,
+			}
 		}
 		if strings.HasPrefix(command.Name, "config") {
 			t.Fatalf("removed config command remains in schema: %q", command.Name)
@@ -397,6 +419,12 @@ func TestRawAndSchema(t *testing.T) {
 			if flag, ok := flags[command][name]; ok && !flag.repeatable {
 				t.Fatalf("%s --%s is not repeatable", command, name)
 			}
+		}
+	}
+	for _, command := range []string{"issues create", "issues update", "issues comment"} {
+		inputFormat, ok := flags[command]["input-format"]
+		if !ok || inputFormat.kind != "enum:jira|markdown" || inputFormat.defaultValue != "jira" {
+			t.Fatalf("%s --input-format schema = %+v, present=%t", command, inputFormat, ok)
 		}
 	}
 }
