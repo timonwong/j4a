@@ -69,7 +69,21 @@ type jiraMarkupRenderer struct {
 const (
 	listItemBlockReason   = "list items may contain only text and nested lists"
 	blockquoteBlockReason = "blockquotes may contain only paragraphs"
+	maxCodeLines          = 20
 )
+
+var codeLanguageAliases = map[string]string{
+	"javascript": "javascript",
+	"js":         "javascript",
+	"jsx":        "javascript",
+	"mjs":        "javascript",
+	"bash":       "bash",
+	"sh":         "bash",
+	"shell":      "bash",
+	"zsh":        "bash",
+}
+
+const codeSpanEscapedDelimiters = `{}[]|-*_`
 
 func (r jiraMarkupRenderer) renderDocument(document ast.Node) (string, error) {
 	blocks := make([]string, 0, document.ChildCount())
@@ -101,6 +115,10 @@ func (r jiraMarkupRenderer) renderBlock(node ast.Node) (string, error) {
 		return r.renderList(typed, "")
 	case *ast.Blockquote:
 		return r.renderBlockquote(typed)
+	case *ast.CodeBlock:
+		return r.renderCodeBlock(typed.Lines(), ""), nil
+	case *ast.FencedCodeBlock:
+		return r.renderCodeBlock(typed.Lines(), codeLanguage(typed.Info, r.source)), nil
 	case *ast.ThematicBreak:
 		return "----", nil
 	case *ast.HTMLBlock:
@@ -299,7 +317,85 @@ func (r jiraMarkupRenderer) renderCodeSpan(code *ast.CodeSpan) (string, error) {
 			result.Write(value)
 		}
 	}
-	return result.String(), nil
+	return escapeCodeSpan(result.String()), nil
+}
+
+func (r jiraMarkupRenderer) renderCodeBlock(lines *text.Segments, language string) string {
+	content := r.codeBlockText(lines)
+	parameters := make([]string, 0, 2)
+	if language != "" {
+		parameters = append(parameters, "language="+language)
+	}
+	if logicalCodeLineCount(content) > maxCodeLines {
+		parameters = append(parameters, "collapse=true")
+	}
+
+	header := "{code}"
+	if len(parameters) != 0 {
+		header = "{code:" + strings.Join(parameters, "|") + "}"
+	}
+	if content == "" || strings.HasSuffix(content, "\n") {
+		return header + "\n" + content + "{code}"
+	}
+	return header + "\n" + content + "\n{code}"
+}
+
+func (r jiraMarkupRenderer) codeBlockText(lines *text.Segments) string {
+	var result strings.Builder
+	for index := 0; index < lines.Len(); index++ {
+		segment := lines.At(index)
+		value := segment.Value(r.source)
+		if segment.ForceNewline && !bytes.HasSuffix(r.source[segment.Start:segment.Stop], []byte("\n")) {
+			value = bytes.TrimSuffix(value, []byte("\n"))
+		}
+		result.Write(value)
+	}
+	return result.String()
+}
+
+func logicalCodeLineCount(content string) int {
+	if content == "" {
+		return 0
+	}
+	if strings.HasSuffix(content, "\n") {
+		content = strings.TrimSuffix(content, "\n")
+	}
+	return strings.Count(content, "\n") + 1
+}
+
+func codeLanguage(info *ast.Text, source []byte) string {
+	if info == nil {
+		return ""
+	}
+	fields := strings.Fields(string(info.Segment.Value(source)))
+	if len(fields) == 0 {
+		return ""
+	}
+	return codeLanguageAliases[strings.ToLower(fields[0])]
+}
+
+func escapeCodeSpan(value string) string {
+	var separated strings.Builder
+	for index := 0; index < len(value); index++ {
+		if value[index] == '\\' && index+1 < len(value) && strings.ContainsRune(codeSpanEscapedDelimiters, rune(value[index+1])) {
+			separated.WriteByte('\\')
+			separated.WriteRune('\u200b')
+			continue
+		}
+		separated.WriteByte(value[index])
+	}
+
+	var escaped strings.Builder
+	for _, character := range separated.String() {
+		if strings.ContainsRune(codeSpanEscapedDelimiters, character) {
+			escaped.WriteByte('\\')
+		}
+		escaped.WriteRune(character)
+	}
+	if strings.HasSuffix(escaped.String(), `\`) {
+		escaped.WriteRune('\u200b')
+	}
+	return escaped.String()
 }
 
 func (r jiraMarkupRenderer) unsupported(node ast.Node) *ConversionError {

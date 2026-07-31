@@ -3,6 +3,7 @@ package markup
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -131,6 +132,149 @@ func TestToJiraConvertsInitialMarkdownInputTracer(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestToJiraRendersCodeBlocks(t *testing.T) {
+	t.Parallel()
+	tests := []markdownConversionCase{
+		{
+			name:  "indented code block",
+			input: "    first\n      second",
+			want:  "{code}\nfirst\n  second\n{code}",
+		},
+		{
+			name:  "javascript aliases are case insensitive",
+			input: "```JsX\nconst answer = 42\n```",
+			want:  "{code:language=javascript}\nconst answer = 42\n{code}",
+		},
+		{
+			name:  "shell aliases are case insensitive",
+			input: "```SHELL\necho ready\n```",
+			want:  "{code:language=bash}\necho ready\n{code}",
+		},
+		{
+			name:  "unknown language and metadata are ignored",
+			input: "```go title=secret\nfmt.Println(\"safe\")\n```",
+			want:  "{code}\nfmt.Println(\"safe\")\n{code}",
+		},
+		{
+			name:  "recognized language ignores trailing metadata",
+			input: "```javascript title=secret\nconsole.log(\"safe\")\n```",
+			want:  "{code:language=javascript}\nconsole.log(\"safe\")\n{code}",
+		},
+		{
+			name:  "blank code block",
+			input: "```\n```",
+			want:  "{code}\n{code}",
+		},
+		{
+			name:  "authored blank line is preserved",
+			input: "```\n\n```",
+			want:  "{code}\n\n{code}",
+		},
+		{
+			name:  "authored whitespace is preserved",
+			input: "```text\n  first  \n\tsecond\n\n```",
+			want:  "{code}\n  first  \n\tsecond\n\n{code}",
+		},
+	}
+	assertMarkdownConversions(t, tests)
+
+	for _, test := range []struct {
+		name     string
+		language string
+		want     string
+	}{
+		{name: "javascript", language: "javascript", want: "javascript"},
+		{name: "js", language: "JS", want: "javascript"},
+		{name: "jsx", language: "jsx", want: "javascript"},
+		{name: "mjs", language: "MJS", want: "javascript"},
+		{name: "bash", language: "bash", want: "bash"},
+		{name: "sh", language: "SH", want: "bash"},
+		{name: "shell", language: "shell", want: "bash"},
+		{name: "zsh", language: "ZSH", want: "bash"},
+	} {
+		t.Run("language alias/"+test.name, func(t *testing.T) {
+			t.Parallel()
+			input := "```" + test.language + "\ncode\n```"
+			want := "{code:language=" + test.want + "}\ncode\n{code}"
+			got, err := ToJira(input, Markdown)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatalf("ToJira() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestToJiraCollapsesCodeBlocksOnlyAboveTheAuthoredLineThreshold(t *testing.T) {
+	t.Parallel()
+	for _, lineCount := range []int{20, 21} {
+		t.Run(fmt.Sprintf("%d logical lines", lineCount), func(t *testing.T) {
+			t.Parallel()
+			lines := make([]string, lineCount)
+			for index := range lines {
+				lines[index] = fmt.Sprintf("line %d", index+1)
+			}
+			input := "```\n" + strings.Join(lines, "\n")
+			wantHeader := "{code}"
+			if lineCount > 20 {
+				wantHeader = "{code:collapse=true}"
+			}
+			want := wantHeader + "\n" + strings.Join(lines, "\n") + "\n{code}"
+
+			got, err := ToJira(input, Markdown)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatalf("ToJira() = %q, want %q", got, want)
+			}
+			if strings.Contains(got, "collapse=false") || strings.Contains(got, "theme=") ||
+				strings.Contains(got, "linenumbers=") || strings.Contains(got, "border") {
+				t.Fatalf("ToJira() emitted forbidden code parameters: %q", got)
+			}
+		})
+	}
+}
+
+func TestToJiraProtectsInlineCodeDelimiters(t *testing.T) {
+	t.Parallel()
+	tests := []markdownConversionCase{
+		{
+			name:  "curly braces",
+			input: "`{key}={value}`",
+			want:  "{{\\{key\\}=\\{value\\}}}",
+		},
+		{
+			name:  "backslash is preserved",
+			input: "`C:\\Users\\admin`",
+			want:  `{{C:\Users\admin}}`,
+		},
+		{
+			name:  "trailing backslash protects the closing delimiter",
+			input: "`path\\`",
+			want:  "{{path\\\u200b}}",
+		},
+		{
+			name:  "backslash before braces gets delimiter protection",
+			input: "`\\{test\\}`",
+			want:  "{{\\\u200b\\{test\\\u200b\\}}}",
+		},
+		{
+			name:  "backslash before escaped delimiters gets delimiter protection",
+			input: "`\\* \\_ \\-`",
+			want:  "{{\\\u200b\\* \\\u200b\\_ \\\u200b\\-}}",
+		},
+		{
+			name:  "square brackets and pipes are escaped",
+			input: "`[item|value]`",
+			want:  "{{\\[item\\|value\\]}}",
+		},
+	}
+	assertMarkdownConversions(t, tests)
 }
 
 func TestToJiraPreservesTightNestedListOwnershipAndOrder(t *testing.T) {
@@ -399,7 +543,7 @@ func TestToJiraReportsUnsupportedMarkdownInputSyntaxWithoutPartialOutput(t *test
 		column   int
 		nodeType string
 	}{
-		{name: "discards earlier blocks", input: "supported\n\n```go\nnot supported\n```", line: 3, column: 1, nodeType: "FencedCodeBlock"},
+		{name: "discards earlier blocks", input: "supported\n\n| A |\n| - |\n| B |", line: 3, column: 1, nodeType: "Table"},
 		{name: "table extension is enabled", input: "| A |\n| - |\n| B |", line: 1, column: 1, nodeType: "Table"},
 	}
 	for _, test := range tests {
