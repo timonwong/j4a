@@ -74,7 +74,7 @@ func TestTableRendersSafeSingleLineTTYOutput(t *testing.T) {
 	renderer := New(&stdout, nil, FormatText, false).WithTerminal(Terminal{IsTTY: true, Width: 80})
 	table := Table{
 		Columns: []Column{Fixed("KEY"), Flexible("SUMMARY")},
-		Rows:    [][]string{{"OPS-1", "修复\t登录\r\n\x1b[31murgent\x1b[0m\x00"}},
+		Rows:    [][]string{{"OPS-1", "修复\t登录\r\n\x1b[31murgent\x1b[0m\x00\u202e\u200b"}},
 	}
 
 	if err := renderer.Table(table); err != nil {
@@ -83,6 +83,19 @@ func TestTableRendersSafeSingleLineTTYOutput(t *testing.T) {
 	const want = "KEY    SUMMARY\nOPS-1  修复 登录 urgent\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
+func TestFixedTTYHeaderNeverTruncatesWithoutRows(t *testing.T) {
+	var stdout bytes.Buffer
+	renderer := New(&stdout, nil, FormatText, false).WithTerminal(Terminal{IsTTY: true, Width: 5})
+	table := Table{Columns: []Column{Fixed("IDENTIFIER"), Flexible("TEXT")}}
+
+	if err := renderer.Table(table); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "IDENTIFIER") {
+		t.Fatalf("stdout = %q, fixed header was truncated", stdout.String())
 	}
 }
 
@@ -199,6 +212,18 @@ func TestTableReturnsNonTTYWriteError(t *testing.T) {
 	})
 	if !errors.Is(err, want) {
 		t.Fatalf("error = %v, want %v", err, want)
+	}
+}
+
+func TestJSONPreservesOriginalControlBearingValues(t *testing.T) {
+	var stdout bytes.Buffer
+	value := map[string]string{"text": "line 1\nline 2\t\x1b[31mred\x1b[0m\u202e"}
+	if err := New(&stdout, nil, FormatJSON, false).Success(value); err != nil {
+		t.Fatal(err)
+	}
+	const want = "{\"schemaVersion\":\"1\",\"data\":{\"text\":\"line 1\\nline 2\\t\\u001b[31mred\\u001b[0m\u202e\"}}\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
 }
 

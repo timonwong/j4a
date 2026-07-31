@@ -85,27 +85,37 @@ func TestTextTableUsesOutputTerminalMode(t *testing.T) {
 		_, _ = io.WriteString(writer, `{"startAt":0,"maxResults":50,"total":1,"issues":[{"id":"1","key":"OPS-1","fields":{"summary":"Fix login","status":{"id":"1","name":"Open"},"assignee":{"name":"alice","displayName":"Alice"}}}]}`)
 	}))
 	defer server.Close()
-
-	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "issue", "list", "--project", "OPS"}, strings.NewReader(""), stdout, stderr)
-	if code != 0 || stderr.Len() != 0 {
-		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
+	configPath := writeCLIConfig(t, server.URL, false)
 	const wantTSV = "OPS-1\tFix login\tOpen\tAlice\n"
-	if stdout.String() != wantTSV {
-		t.Fatalf("stdout=%q, want %q", stdout.String(), wantTSV)
-	}
-
-	t.Setenv("JIRO_FORCE_TTY", "1")
-	stdout.Reset()
-	stderr.Reset()
-	code = Execute([]string{"--config", writeCLIConfig(t, server.URL, false), "issue", "list", "--project", "OPS"}, strings.NewReader(""), stdout, stderr)
-	if code != 0 || stderr.Len() != 0 {
-		t.Fatalf("forced TTY code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
 	const wantTTY = "KEY    SUMMARY    STATUS  ASSIGNEE\nOPS-1  Fix login  Open    Alice\n"
-	if stdout.String() != wantTTY {
-		t.Fatalf("forced TTY stdout=%q, want %q", stdout.String(), wantTTY)
+	tests := []struct {
+		name  string
+		set   bool
+		value string
+		want  string
+	}{
+		{name: "unset", want: wantTSV},
+		{name: "empty", set: true, value: "", want: wantTSV},
+		{name: "zero", set: true, value: "0", want: wantTSV},
+		{name: "false", set: true, value: "false", want: wantTSV},
+		{name: "no", set: true, value: "no", want: wantTSV},
+		{name: "off", set: true, value: "off", want: wantTSV},
+		{name: "one", set: true, value: "1", want: wantTTY},
+		{name: "true", set: true, value: "true", want: wantTTY},
+		{name: "yes", set: true, value: "yes", want: wantTTY},
+		{name: "on", set: true, value: "on", want: wantTTY},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.set {
+				t.Setenv("JIRO_FORCE_TTY", test.value)
+			}
+			stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+			code := Execute([]string{"--config", configPath, "issue", "list", "--project", "OPS"}, strings.NewReader(""), stdout, stderr)
+			if code != 0 || stderr.Len() != 0 || stdout.String() != test.want {
+				t.Fatalf("code=%d stdout=%q stderr=%q want=%q", code, stdout.String(), stderr.String(), test.want)
+			}
+		})
 	}
 }
 
@@ -500,7 +510,6 @@ func TestInvalidOutputFailsBeforeNetwork(t *testing.T) {
 
 func TestInvalidForceTTYOnlyAffectsTextBeforeNetwork(t *testing.T) {
 	clearCommandEnv(t)
-	t.Setenv("JIRO_FORCE_TTY", "sometimes")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		calls.Add(1)
@@ -512,27 +521,45 @@ func TestInvalidForceTTYOnlyAffectsTextBeforeNetwork(t *testing.T) {
 	defer server.Close()
 	configPath := writeCLIConfig(t, server.URL, false)
 
-	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"--config", configPath, "auth", "status"}, strings.NewReader(""), stdout, stderr)
-	if code != 2 || calls.Load() != 0 || stdout.Len() != 0 || stderr.String() != "JIRO_FORCE_TTY must be a boolean\n" {
-		t.Fatalf("text code=%d calls=%d stdout=%q stderr=%q", code, calls.Load(), stdout.String(), stderr.String())
+	for _, value := range []string{"sometimes", "TRUE", " true", "on "} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("JIRO_FORCE_TTY", value)
+			stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+			code := Execute([]string{"--config", configPath, "auth", "status"}, strings.NewReader(""), stdout, stderr)
+			if code != 2 || calls.Load() != 0 || stdout.Len() != 0 || stderr.String() != "JIRO_FORCE_TTY must be a boolean\n" {
+				t.Fatalf("text code=%d calls=%d stdout=%q stderr=%q", code, calls.Load(), stdout.String(), stderr.String())
+			}
+		})
 	}
 
-	stdout.Reset()
-	stderr.Reset()
-	code = Execute([]string{"--config", configPath, "-ojson", "auth", "status"}, strings.NewReader(""), stdout, stderr)
+	t.Setenv("JIRO_FORCE_TTY", "on ")
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{"--config", configPath, "-ojson", "auth", "status"}, strings.NewReader(""), stdout, stderr)
 	if code != 0 || calls.Load() != 1 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"schemaVersion":"1"`) {
 		t.Fatalf("JSON code=%d calls=%d stdout=%q stderr=%q", code, calls.Load(), stdout.String(), stderr.String())
 	}
 }
 
-func TestInvalidForceTTYDoesNotAffectSchema(t *testing.T) {
+func TestInvalidForceTTYDoesNotAffectHelpVersionOrSchema(t *testing.T) {
 	clearCommandEnv(t)
 	t.Setenv("JIRO_FORCE_TTY", "sometimes")
-	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"schema"}, strings.NewReader(""), stdout, stderr)
-	if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"contractVersion":"3"`) {
-		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "help", args: []string{"--help"}, want: "Usage:"},
+		{name: "version", args: []string{"--version"}, want: "jiro version"},
+		{name: "schema", args: []string{"schema"}, want: `"contractVersion":"3"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+			code := Execute(test.args, strings.NewReader(""), stdout, stderr)
+			if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), test.want) {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+		})
 	}
 }
 

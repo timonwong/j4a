@@ -255,8 +255,9 @@ jiro issue list --output=json
 For commands with tabular text output, jiro adapts to stdout:
 
 - A terminal receives a column-aligned table sized to the available width.
-  Issue Keys, IDs, and other fixed identifiers remain complete; descriptive
-  columns may be truncated with `...`.
+  Dedicated Issue Key, ID, Alias, and other fixed columns remain complete;
+  descriptive columns and mixed detail-table `VALUE` columns may be truncated
+  with `...`.
 - A pipe or file receives headerless TSV with untruncated single-line values.
   An empty result writes zero bytes.
 
@@ -268,10 +269,10 @@ pipeline, set `JIRO_FORCE_TTY` to `1`, `true`, `yes`, or `on`:
 JIRO_FORCE_TTY=1 jiro issue list --project OPS | less
 ```
 
-The values `0`, `false`, `no`, and `off` leave normal terminal detection in
-place. Any other value is a configuration error for text output. When forced,
-jiro reads the controlling terminal width and falls back to 80 columns if it
-cannot be determined.
+The exact values `0`, `false`, `no`, and `off` leave normal terminal detection
+in place. Any other value is a configuration error for text output. When
+forced, jiro reads the controlling terminal width and falls back to 80 columns
+if it cannot be determined.
 
 Normalized JSON uses a stable envelope:
 

@@ -17,8 +17,9 @@ import (
 type Format string
 
 const (
-	FormatText Format = "text"
-	FormatJSON Format = "json"
+	FormatText           Format = "text"
+	FormatJSON           Format = "json"
+	defaultTerminalWidth        = 80
 
 	// SchemaVersion identifies the stable, public JSON envelope version.
 	SchemaVersion = "1"
@@ -203,19 +204,29 @@ func (r Renderer) Table(table Table) error {
 	}
 	width := r.terminal.Width
 	if r.terminal.IsTTY && width <= 0 {
-		width = 80
+		width = defaultTerminalWidth
 	}
 	tracked := &trackingWriter{writer: r.Stdout}
 	printer := tableprinter.New(tracked, r.terminal.IsTTY, width)
-	printer.AddHeader(headers)
+	addField := func(column Column, cell string) {
+		if column.fixed {
+			printer.AddField(cell, tableprinter.WithTruncate(nil))
+		} else {
+			printer.AddField(cell)
+		}
+	}
+	if r.terminal.IsTTY {
+		for i, header := range headers {
+			addField(table.Columns[i], header)
+		}
+		printer.EndRow()
+	} else {
+		printer.AddHeader(headers)
+	}
 	for _, row := range table.Rows {
 		for i, cell := range row {
 			cell = sanitizeCell(cell)
-			if table.Columns[i].fixed {
-				printer.AddField(cell, tableprinter.WithTruncate(nil))
-			} else {
-				printer.AddField(cell)
-			}
+			addField(table.Columns[i], cell)
 		}
 		printer.EndRow()
 	}
@@ -250,7 +261,7 @@ func sanitizeCell(value string) string {
 		case '\r', '\n', '\t':
 			result.WriteByte(' ')
 		default:
-			if !unicode.IsControl(char) {
+			if !unicode.IsControl(char) && !unicode.Is(unicode.Cf, char) {
 				result.WriteRune(char)
 			}
 		}
