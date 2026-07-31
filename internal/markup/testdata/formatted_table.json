@@ -1,0 +1,4 @@
+{
+  "input": "| Name | Details |\n| :--- | :---: |\n| **jiro** | _Markdown_ with ~~old~~ and `code` |\n| [Docs](https://example.com/docs) | literal \\| pipe |",
+  "want": "||Name||Details||\n|*jiro*|_Markdown_ with -old- and {{code}}|\n|[Docs|https://example.com/docs]|literal \\| pipe|"
+}

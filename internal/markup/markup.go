@@ -184,6 +184,8 @@ func (r jiraMarkupRenderer) renderBlock(node ast.Node) (string, error) {
 		return r.renderList(typed, "")
 	case *ast.Blockquote:
 		return r.renderBlockquote(typed)
+	case *extensionast.Table:
+		return r.renderTable(typed)
 	case *ast.CodeBlock:
 		return r.renderCodeBlock(typed.Lines(), ""), nil
 	case *ast.FencedCodeBlock:
@@ -261,6 +263,74 @@ func (r jiraMarkupRenderer) renderList(list *ast.List, parentMarkers string) (st
 		}
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+func (r jiraMarkupRenderer) renderTable(table *extensionast.Table) (string, error) {
+	rows := make([]string, 0, table.ChildCount())
+	for child := table.FirstChild(); child != nil; child = child.NextSibling() {
+		var row ast.Node
+		var delimiter string
+		switch typed := child.(type) {
+		case *extensionast.TableHeader:
+			row, delimiter = typed, "||"
+		case *extensionast.TableRow:
+			row, delimiter = typed, "|"
+		default:
+			return "", r.unsupported(child)
+		}
+		markup, err := r.renderTableRow(row, delimiter)
+		if err != nil {
+			return "", err
+		}
+		rows = append(rows, markup)
+	}
+	return strings.Join(rows, "\n"), nil
+}
+
+func (r jiraMarkupRenderer) renderTableRow(row ast.Node, delimiter string) (string, error) {
+	cells := make([]string, 0, row.ChildCount())
+	for child := row.FirstChild(); child != nil; child = child.NextSibling() {
+		cell, ok := child.(*extensionast.TableCell)
+		if !ok {
+			return "", r.conversionError(child, "table rows may contain only table cells")
+		}
+		content, err := r.renderTableCell(cell)
+		if err != nil {
+			return "", err
+		}
+		cells = append(cells, content)
+	}
+	return delimiter + strings.Join(cells, delimiter) + delimiter, nil
+}
+
+func (r jiraMarkupRenderer) renderTableCell(cell *extensionast.TableCell) (string, error) {
+	if err := r.validateTableCellContent(cell); err != nil {
+		return "", err
+	}
+	return r.renderInlines(cell, false)
+}
+
+func (r jiraMarkupRenderer) validateTableCellContent(parent ast.Node) error {
+	for child := parent.FirstChild(); child != nil; child = child.NextSibling() {
+		switch typed := child.(type) {
+		case *ast.Image:
+			return r.conversionError(child, "images are not supported in table cells")
+		case *ast.RawHTML:
+			return r.conversionError(child, "raw HTML is not supported in table cells")
+		case *ast.Text:
+			if typed.HardLineBreak() {
+				return r.conversionError(child, "hard breaks are not supported in table cells")
+			}
+		default:
+			if child.Type() == ast.TypeBlock {
+				return r.conversionError(child, "block-level content is not supported in table cells")
+			}
+		}
+		if err := r.validateTableCellContent(child); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r jiraMarkupRenderer) renderInlines(parent ast.Node, atLineStart bool) (string, error) {
