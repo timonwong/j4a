@@ -5,7 +5,7 @@ The tagged commit must be reachable from `main`; the workflow then calls the
 same Ubuntu and macOS checks used by normal CI before any job receives write
 permission.
 
-The release publishes standalone `j4a` binaries for Linux, macOS, and Windows
+The release publishes standalone `jiro` binaries for Linux, macOS, and Windows
 on amd64 and arm64. It does not publish operating-system packages or archives.
 Every release also includes one SHA-256 checksum file covering all six
 binaries.
@@ -22,7 +22,7 @@ GITHUB_TOKEN="$(gh auth token)" \
 ```
 
 Inspect the snapshot metadata and checksum file under `dist/`. A real release
-must contain exactly six binaries plus the checksum file, and `j4a --version`
+must contain exactly six binaries plus the checksum file, and `jiro --version`
 must report the tag version without the leading `v`.
 
 Release assets are not created manually. If a release workflow fails, fix the

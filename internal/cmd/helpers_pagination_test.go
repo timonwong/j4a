@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/timonwong/j4a/internal/apperr"
-	"github.com/timonwong/j4a/internal/jira"
+	"github.com/timonwong/jiro/internal/apperr"
+	"github.com/timonwong/jiro/internal/jira"
 )
 
 func TestSearchAllRejectsNonProgressingPagination(t *testing.T) {

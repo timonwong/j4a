@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/timonwong/j4a/internal/fieldcache"
+	"github.com/timonwong/jiro/internal/fieldcache"
 )
 
 func TestBulkTransitionDryRunPreflightsEveryJQLPage(t *testing.T) {

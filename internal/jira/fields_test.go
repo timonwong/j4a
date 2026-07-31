@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/timonwong/j4a/internal/apperr"
+	"github.com/timonwong/jiro/internal/apperr"
 )
 
 func TestResolveCustomFieldPriorityAndAmbiguity(t *testing.T) {

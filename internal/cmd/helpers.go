@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/timonwong/j4a/internal/apperr"
-	"github.com/timonwong/j4a/internal/config"
-	"github.com/timonwong/j4a/internal/jira"
-	"github.com/timonwong/j4a/internal/markup"
+	"github.com/timonwong/jiro/internal/apperr"
+	"github.com/timonwong/jiro/internal/config"
+	"github.com/timonwong/jiro/internal/jira"
+	"github.com/timonwong/jiro/internal/markup"
 )
 
 var directCustomFieldID = regexp.MustCompile(`^customfield_[0-9]+$`)

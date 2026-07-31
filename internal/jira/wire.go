@@ -3,7 +3,7 @@ package jira
 import (
 	"encoding/json"
 
-	"github.com/timonwong/j4a/internal/apperr"
+	"github.com/timonwong/jiro/internal/apperr"
 )
 
 type wireUser struct {

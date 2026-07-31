@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues for `timonwong/j4a`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs are tracked in GitHub Issues for `timonwong/jiro`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

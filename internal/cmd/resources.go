@@ -5,9 +5,9 @@ import (
 	"net/url"
 
 	"github.com/spf13/cobra"
-	"github.com/timonwong/j4a/internal/apperr"
-	"github.com/timonwong/j4a/internal/jira"
-	"github.com/timonwong/j4a/internal/output"
+	"github.com/timonwong/jiro/internal/apperr"
+	"github.com/timonwong/jiro/internal/jira"
+	"github.com/timonwong/jiro/internal/output"
 )
 
 func (a *app) searchCommand() *cobra.Command {

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/timonwong/j4a/internal/config"
+	"github.com/timonwong/jiro/internal/config"
 )
 
 func (a *app) configureCompletions(root *cobra.Command) {

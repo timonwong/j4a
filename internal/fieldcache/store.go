@@ -58,7 +58,7 @@ type Snapshot struct {
 }
 
 // Store owns field-cache storage. Leave Root empty to use
-// os.UserCacheDir()/j4a. Leave Now nil to use time.Now. Root and Now are
+// os.UserCacheDir()/jiro. Leave Now nil to use time.Now. Root and Now are
 // exported for test injection and for callers that need an isolated cache.
 type Store struct {
 	Root string
@@ -66,7 +66,7 @@ type Store struct {
 }
 
 // New returns a Store with the supplied optional root and clock. Empty root
-// uses os.UserCacheDir()/j4a and nil now uses time.Now.
+// uses os.UserCacheDir()/jiro and nil now uses time.Now.
 func New(root string, now func() time.Time) Store {
 	return Store{Root: root, Now: now}
 }
@@ -228,7 +228,7 @@ func (s Store) root() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve user cache directory: %w", err)
 	}
-	return filepath.Join(cacheDir, "j4a"), nil
+	return filepath.Join(cacheDir, "jiro"), nil
 }
 
 func (s Store) now() time.Time {

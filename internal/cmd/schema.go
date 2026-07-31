@@ -2,8 +2,8 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"github.com/timonwong/j4a/internal/apperr"
-	"github.com/timonwong/j4a/internal/output"
+	"github.com/timonwong/jiro/internal/apperr"
+	"github.com/timonwong/jiro/internal/output"
 )
 
 type cliSchema struct {
@@ -52,7 +52,7 @@ type outputSchema struct {
 func (a *app) schemaCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "schema",
-		Short: "Describe j4a's machine-readable CLI contract",
+		Short: "Describe jiro's machine-readable CLI contract",
 		Args:  exactArgs(0),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if a.raw {
@@ -67,7 +67,7 @@ func (a *app) schemaCommand() *cobra.Command {
 func schemaDocument() cliSchema {
 	return cliSchema{
 		ContractVersion: "3",
-		Program:         "j4a",
+		Program:         "jiro",
 		Platform:        "Jira Data Center/Server REST API v2",
 		GlobalFlags: []flagSchema{
 			flag("config", "c", "path"), flag("profile", "", "string"), flag("host", "", "url"),

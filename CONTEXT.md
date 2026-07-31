@@ -1,6 +1,6 @@
-# j4a Jira CLI
+# jiro Jira CLI
 
-j4a provides a scriptable command-line interface for working with Jira Data Center and Server. Its language distinguishes Jira-owned identifiers and markup from the friendlier aliases and input formats accepted by the CLI.
+jiro provides a scriptable command-line interface for working with Jira Data Center and Server. Its language distinguishes Jira-owned identifiers and markup from the friendlier aliases and input formats accepted by the CLI.
 
 ## Language
 
@@ -33,7 +33,7 @@ The Jira-owned, instance-specific identifier for a custom field, such as `custom
 _Avoid_: Custom field key
 
 **Custom Field Alias**:
-A j4a-friendly slug derived from a custom field's display name, such as `story-points`.
+A jiro-friendly slug derived from a custom field's display name, such as `story-points`.
 _Avoid_: Custom Field ID, field name
 
 **Principal**:
@@ -49,7 +49,7 @@ Jira's wiki-style text notation accepted directly by Jira Data Center and Server
 _Avoid_: Jira Markdown, wiki Markdown
 
 **Markdown Input**:
-CommonMark-compatible text that j4a converts to Jira Markup only when explicitly requested.
+CommonMark-compatible text that jiro converts to Jira Markup only when explicitly requested.
 _Avoid_: Jira Markup
 
 **Sprint**:
@@ -65,5 +65,5 @@ A Jira-owned definition that names an Issue Link and its inward and outward rela
 _Avoid_: Relationship type, link name
 
 **Bulk Operation**:
-One requested action applied by j4a to every Issue selected by JQL, with an ordered outcome recorded for each Issue.
+One requested action applied by jiro to every Issue selected by JQL, with an ordered outcome recorded for each Issue.
 _Avoid_: Transaction, batch endpoint

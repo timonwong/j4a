@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	command "github.com/timonwong/j4a/internal/cmd"
+	command "github.com/timonwong/jiro/internal/cmd"
 )
 
 func main() {

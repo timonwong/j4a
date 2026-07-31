@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/timonwong/j4a/internal/fieldcache"
-	"github.com/timonwong/j4a/internal/output"
+	"github.com/timonwong/jiro/internal/fieldcache"
+	"github.com/timonwong/jiro/internal/output"
 )
 
 var testFieldPrincipal = fieldcache.Principal{AccountID: "account-alice", Username: "alice"}

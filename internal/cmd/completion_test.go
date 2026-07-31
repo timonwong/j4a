@@ -15,9 +15,9 @@ import (
 func TestCompletionScripts(t *testing.T) {
 	clearCommandEnv(t)
 	tests := map[string]string{
-		"bash":       "__start_j4a",
-		"zsh":        "#compdef j4a",
-		"fish":       "complete -c j4a",
+		"bash":       "__start_jiro",
+		"zsh":        "#compdef jiro",
+		"fish":       "complete -c jiro",
 		"powershell": "Register-ArgumentCompleter",
 	}
 	for shell, marker := range tests {

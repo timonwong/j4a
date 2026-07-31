@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/timonwong/j4a/internal/apperr"
+	"github.com/timonwong/jiro/internal/apperr"
 )
 
 func TestClientAuthHeadersAndBasePath(t *testing.T) {
@@ -30,9 +30,9 @@ func TestClientAuthHeadersAndBasePath(t *testing.T) {
 		{
 			name: "pat takes precedence",
 			config: func(base string) Config {
-				return Config{BaseURL: base + "/jira", Username: "ada", Password: "secret", PAT: "token", UserAgent: "j4a-test"}
+				return Config{BaseURL: base + "/jira", Username: "ada", Password: "secret", PAT: "token", UserAgent: "jiro-test"}
 			},
-			wantAuth: "Bearer token", wantAgent: "j4a-test",
+			wantAuth: "Bearer token", wantAgent: "jiro-test",
 		},
 	}
 	for _, test := range cases {

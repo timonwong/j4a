@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/timonwong/j4a/internal/apperr"
+	"github.com/timonwong/jiro/internal/apperr"
 )
 
-const defaultUserAgent = "j4a/1"
+const defaultUserAgent = "jiro/1"
 
 // Config configures a Client. PAT uses Jira's Bearer authentication; Basic
 // authentication is used when Username and Password are supplied.

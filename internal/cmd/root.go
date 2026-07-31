@@ -1,4 +1,4 @@
-// Package cmd defines j4a's public Cobra command tree.
+// Package cmd defines jiro's public Cobra command tree.
 package cmd
 
 import (
@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/timonwong/j4a/internal/apperr"
-	"github.com/timonwong/j4a/internal/config"
-	"github.com/timonwong/j4a/internal/fieldcache"
-	"github.com/timonwong/j4a/internal/jira"
-	"github.com/timonwong/j4a/internal/output"
+	"github.com/timonwong/jiro/internal/apperr"
+	"github.com/timonwong/jiro/internal/config"
+	"github.com/timonwong/jiro/internal/fieldcache"
+	"github.com/timonwong/jiro/internal/jira"
+	"github.com/timonwong/jiro/internal/output"
 )
 
 var version = "dev"
@@ -38,7 +38,7 @@ type app struct {
 	quiet      bool
 }
 
-// Execute runs j4a and returns a stable process exit code.
+// Execute runs jiro and returns a stable process exit code.
 func Execute(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	a := &app{stdin: stdin, stdout: stdout, stderr: stderr}
 	return a.execute(args)
@@ -65,7 +65,7 @@ func (a *app) execute(args []string) int {
 
 func (a *app) rootCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "j4a",
+		Use:           "jiro",
 		Short:         "A scriptable Jira CLI for humans and AI agents",
 		Version:       version,
 		SilenceErrors: true,
@@ -145,7 +145,7 @@ func (a *app) settings() (config.Settings, error) {
 		return config.Settings{}, err
 	}
 	if settings.APIVersion != 2 {
-		return config.Settings{}, apperr.New(apperr.KindConfig, "j4a v1 supports Jira REST API version 2 only")
+		return config.Settings{}, apperr.New(apperr.KindConfig, "jiro v1 supports Jira REST API version 2 only")
 	}
 	return settings, nil
 }
@@ -174,7 +174,7 @@ func (a *app) writableClient() (*jira.Client, config.Settings, error) {
 		return nil, config.Settings{}, err
 	}
 	if preview.APIVersion != 2 {
-		return nil, config.Settings{}, apperr.New(apperr.KindConfig, "j4a v1 supports Jira REST API version 2 only")
+		return nil, config.Settings{}, apperr.New(apperr.KindConfig, "jiro v1 supports Jira REST API version 2 only")
 	}
 	if err := a.requireWritable(preview); err != nil {
 		return nil, config.Settings{}, err

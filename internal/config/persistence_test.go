@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/timonwong/j4a/internal/apperr"
+	"github.com/timonwong/jiro/internal/apperr"
 )
 
 type faultStore struct {
@@ -67,7 +67,7 @@ func popError(errors *[]error) error {
 }
 
 func TestLoadDraftAllowsIncompleteAndReportsTargetExistence(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	missingPath := filepath.Join(t.TempDir(), "config.toml")
 	draft, err := LoadDraft(Options{ConfigPath: missingPath})
 	if err != nil {
@@ -105,7 +105,7 @@ read_only = false
 }
 
 func TestCommitLoginPreservesSourceOutsideAuthenticationFields(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	path := writeConfig(t, `# file header
 [default]
 host = "https://default.example" # keep default formatting
@@ -174,7 +174,7 @@ func TestCommitLoginBasicPATSwitchAndPrivateMode(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows permissions use ACLs")
 	}
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	path := writeConfig(t, `[default]
 host = "jira.example"
 username = "obsolete"
@@ -230,7 +230,7 @@ use_keyring = false
 }
 
 func TestProfileScopedKeyringIsolationAndLegacyIgnored(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	if KeyringAccount("") != "default" || KeyringAccount("work") != "profile:work" {
 		t.Fatalf("unexpected keyring accounts: %q %q", KeyringAccount(""), KeyringAccount("work"))
 	}
@@ -271,7 +271,7 @@ use_keyring = true
 }
 
 func TestLoginAndLogoutAreIdempotent(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	path := filepath.Join(t.TempDir(), "config.toml")
 	store := &memoryStore{secrets: map[string]string{}}
 	for i := 0; i < 2; i++ {
@@ -325,7 +325,7 @@ read_only = true
 }
 
 func TestLogoutUsesPersistedStoreAndMissingProfileIsConfigError(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	path := writeConfig(t, `[default]
 host = "jira.example"
 auth_type = "pat"
@@ -337,8 +337,8 @@ host = "jira.example"
 auth_type = "pat"
 use_keyring = true
 `)
-	t.Setenv("J4A_USE_KEYRING", "false")
-	t.Setenv("J4A_AUTH_TYPE", "basic")
+	t.Setenv("JIRO_USE_KEYRING", "false")
+	t.Setenv("JIRO_AUTH_TYPE", "basic")
 	store := &memoryStore{secrets: map[string]string{KeyringService + "/profile:work": "work-token"}}
 	result, err := Logout(Options{ConfigPath: path, Profile: "work"}, store)
 	if err != nil {
@@ -357,7 +357,7 @@ use_keyring = true
 }
 
 func TestCommitLoginRollsBackCredentialOnWriteFailure(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	path := writeConfig(t, `[default]
 host = "old.example"
 username = "alice"
@@ -389,7 +389,7 @@ use_keyring = true
 }
 
 func TestCommitLoginRollsBackPartialSecretStoreFailure(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	path := writeConfig(t, `[default]
 host = "jira.example"
 username = "alice"
@@ -416,7 +416,7 @@ use_keyring = true
 }
 
 func TestCommitLoginRejectsConcurrentConfigChanges(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	path := writeConfig(t, `[default]
 host = "jira.example"
 username = "alice"
@@ -443,7 +443,7 @@ use_keyring = true
 }
 
 func TestCommitLoginRollsBackWhenConfigChangesAfterKeyringWrite(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	path := writeConfig(t, `[default]
 host = "jira.example"
 username = "alice"
@@ -475,7 +475,7 @@ use_keyring = true
 }
 
 func TestLogoutWriteFailureLeavesPlaintextCredential(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	path := writeConfig(t, `[default]
 host = "jira.example"
 auth_type = "pat"

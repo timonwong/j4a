@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/timonwong/j4a/internal/apperr"
+	"github.com/timonwong/jiro/internal/apperr"
 )
 
 type memoryStore struct{ secrets map[string]string }
@@ -35,7 +35,7 @@ func (s *memoryStore) Delete(service, account string) error {
 }
 
 func TestLoadPrecedence(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	path := writeConfig(t, `
 [default]
 host = "https://default.example/jira/"
@@ -62,12 +62,12 @@ read_only = false
 		wantReadOnly                     bool
 	}{
 		{"profile overrides default", nil, Options{ConfigPath: path, Profile: "work"}, "https://profile.example/jira", "profile-user", "profile-password", 3, false},
-		{"environment overrides profile", map[string]string{"J4A_PROFILE": "work", "J4A_HOST": "https://env.example", "J4A_USERNAME": "env-user", "J4A_PASSWORD": "env-password", "J4A_API_VERSION": "4", "J4A_READ_ONLY": "true"}, Options{ConfigPath: path}, "https://env.example", "env-user", "env-password", 4, true},
-		{"options override environment", map[string]string{"J4A_PROFILE": "work", "J4A_HOST": "https://env.example", "J4A_USERNAME": "env-user", "J4A_PASSWORD": "env-password", "J4A_API_VERSION": "4", "J4A_READ_ONLY": "true"}, Options{ConfigPath: path, Host: "https://cli.example/", Username: "cli-user", Password: "cli-password", APIVersion: 5, ReadOnly: &falseValue}, "https://cli.example", "cli-user", "cli-password", 5, false},
+		{"environment overrides profile", map[string]string{"JIRO_PROFILE": "work", "JIRO_HOST": "https://env.example", "JIRO_USERNAME": "env-user", "JIRO_PASSWORD": "env-password", "JIRO_API_VERSION": "4", "JIRO_READ_ONLY": "true"}, Options{ConfigPath: path}, "https://env.example", "env-user", "env-password", 4, true},
+		{"options override environment", map[string]string{"JIRO_PROFILE": "work", "JIRO_HOST": "https://env.example", "JIRO_USERNAME": "env-user", "JIRO_PASSWORD": "env-password", "JIRO_API_VERSION": "4", "JIRO_READ_ONLY": "true"}, Options{ConfigPath: path, Host: "https://cli.example/", Username: "cli-user", Password: "cli-password", APIVersion: 5, ReadOnly: &falseValue}, "https://cli.example", "cli-user", "cli-password", 5, false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			clearJ4AEnv(t)
+			clearJiroEnv(t)
 			for name, value := range test.env {
 				t.Setenv(name, value)
 			}
@@ -89,14 +89,14 @@ func TestDefaultPathUsesXDG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(directory, "j4a", "config.toml")
+	want := filepath.Join(directory, "jiro", "config.toml")
 	if path != want {
 		t.Fatalf("DefaultPath() = %q, want %q", path, want)
 	}
 }
 
 func TestProfileNames(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	path := writeConfig(t, `
 [default]
 host = "jira.example"
@@ -125,7 +125,7 @@ func TestPlaintextSecretRequiresPrivatePermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows permissions use ACLs")
 	}
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	path := writeConfig(t, "[default]\nhost = \"jira.example\"\nusername = \"user\"\npassword = \"secret\"")
 	if err := os.Chmod(path, 0o644); err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestPlaintextSecretRequiresPrivatePermissions(t *testing.T) {
 }
 
 func TestLoadSecrets(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	path := writeConfig(t, `
 [default]
 host = "jira.example"
@@ -154,13 +154,13 @@ use_keyring = true
 		want     string
 		wantKind apperr.Kind
 	}{
-		{"environment wins", map[string]string{"J4A_TOKEN": "env-token"}, store, "env-token", ""},
+		{"environment wins", map[string]string{"JIRO_TOKEN": "env-token"}, store, "env-token", ""},
 		{"keyring wins over toml", nil, store, "keyring-token", ""},
 		{"keyring miss is config error", nil, &memoryStore{secrets: map[string]string{}}, "", apperr.KindConfig},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			clearJ4AEnv(t)
+			clearJiroEnv(t)
 			for name, value := range test.env {
 				t.Setenv(name, value)
 			}
@@ -179,7 +179,7 @@ use_keyring = true
 }
 
 func TestCredentialValidationAndMaskedView(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	tests := []struct {
 		name, body string
 		want       apperr.Kind
@@ -206,17 +206,17 @@ func TestCredentialValidationAndMaskedView(t *testing.T) {
 }
 
 func TestConfigErrorsAndSecretHelpers(t *testing.T) {
-	clearJ4AEnv(t)
+	clearJiroEnv(t)
 	tests := []struct {
 		name, body string
 		env        map[string]string
 	}{
 		{"invalid toml", "[wrong]\nhost = \"jira.example\"", nil},
-		{"invalid env bool", "[default]\nhost = \"jira.example\"\nusername = \"user\"\npassword = \"password\"", map[string]string{"J4A_READ_ONLY": "sometimes"}},
+		{"invalid env bool", "[default]\nhost = \"jira.example\"\nusername = \"user\"\npassword = \"password\"", map[string]string{"JIRO_READ_ONLY": "sometimes"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			clearJ4AEnv(t)
+			clearJiroEnv(t)
 			for name, value := range test.env {
 				t.Setenv(name, value)
 			}
@@ -251,9 +251,9 @@ func writeConfig(t *testing.T, body string) string {
 	return path
 }
 
-func clearJ4AEnv(t *testing.T) {
+func clearJiroEnv(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{"XDG_CONFIG_HOME", "J4A_CONFIG_FILE", "J4A_CONFIG", "J4A_PROFILE", "J4A_HOST", "J4A_USERNAME", "J4A_AUTH_TYPE", "J4A_API_VERSION", "J4A_READ_ONLY", "J4A_USE_KEYRING", "J4A_PASSWORD", "J4A_TOKEN"} {
+	for _, name := range []string{"XDG_CONFIG_HOME", "JIRO_CONFIG_FILE", "JIRO_CONFIG", "JIRO_PROFILE", "JIRO_HOST", "JIRO_USERNAME", "JIRO_AUTH_TYPE", "JIRO_API_VERSION", "JIRO_READ_ONLY", "JIRO_USE_KEYRING", "JIRO_PASSWORD", "JIRO_TOKEN"} {
 		old, existed := os.LookupEnv(name)
 		if err := os.Unsetenv(name); err != nil {
 			t.Fatal(err)

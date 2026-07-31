@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/timonwong/j4a/internal/fieldcache"
+	"github.com/timonwong/jiro/internal/fieldcache"
 )
 
 func TestVersion(t *testing.T) {
@@ -27,7 +27,7 @@ func TestVersion(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{"--version"}, strings.NewReader(""), stdout, stderr)
-	if code != 0 || stdout.String() != "j4a version 1.2.3-test\n" || stderr.Len() != 0 {
+	if code != 0 || stdout.String() != "jiro version 1.2.3-test\n" || stderr.Len() != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
@@ -391,8 +391,8 @@ func writeCLIConfig(t *testing.T, host string, readOnly bool) string {
 func clearCommandEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
-		"J4A_CONFIG_FILE", "J4A_CONFIG", "J4A_PROFILE", "J4A_HOST", "J4A_USERNAME", "J4A_AUTH_TYPE",
-		"J4A_API_VERSION", "J4A_READ_ONLY", "J4A_USE_KEYRING", "J4A_PASSWORD", "J4A_TOKEN",
+		"JIRO_CONFIG_FILE", "JIRO_CONFIG", "JIRO_PROFILE", "JIRO_HOST", "JIRO_USERNAME", "JIRO_AUTH_TYPE",
+		"JIRO_API_VERSION", "JIRO_READ_ONLY", "JIRO_USE_KEYRING", "JIRO_PASSWORD", "JIRO_TOKEN",
 	} {
 		t.Setenv(name, "")
 		if err := os.Unsetenv(name); err != nil {

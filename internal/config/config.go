@@ -1,4 +1,4 @@
-// Package config loads j4a connection profiles and resolves credentials.
+// Package config loads jiro connection profiles and resolves credentials.
 package config
 
 import (
@@ -12,12 +12,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/timonwong/j4a/internal/apperr"
+	"github.com/timonwong/jiro/internal/apperr"
 )
 
 const (
-	// KeyringService is the service name used for j4a credentials.
-	KeyringService = "j4a"
+	// KeyringService is the service name used for jiro credentials.
+	KeyringService = "jiro"
 )
 
 // AuthType identifies the authentication scheme used for a Jira Instance.
@@ -122,27 +122,27 @@ type SecretStore interface {
 // ErrSecretNotFound indicates that an account does not exist in a SecretStore.
 var ErrSecretNotFound = errors.New("secret not found")
 
-// DefaultPath returns the XDG-style j4a configuration path.
+// DefaultPath returns the XDG-style jiro configuration path.
 func DefaultPath() (string, error) {
 	if directory := os.Getenv("XDG_CONFIG_HOME"); directory != "" {
-		return filepath.Join(directory, "j4a", "config.toml"), nil
+		return filepath.Join(directory, "jiro", "config.toml"), nil
 	}
 	if runtime.GOOS == "windows" {
 		directory, err := os.UserConfigDir()
 		if err != nil {
 			return "", apperr.Wrap(apperr.KindConfig, err, "determine config directory")
 		}
-		return filepath.Join(directory, "j4a", "config.toml"), nil
+		return filepath.Join(directory, "jiro", "config.toml"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", apperr.Wrap(apperr.KindConfig, err, "determine home directory")
 	}
-	return filepath.Join(home, ".config", "j4a", "config.toml"), nil
+	return filepath.Join(home, ".config", "jiro", "config.toml"), nil
 }
 
 // Load reads TOML configuration and resolves settings with this precedence:
-// options, J4A_* environment variables, selected profile, then [default].
+// options, JIRO_* environment variables, selected profile, then [default].
 // A nil store uses the operating system keyring when use_keyring is enabled.
 func Load(options Options, store SecretStore) (Settings, error) {
 	return load(options, store, true)
@@ -184,7 +184,7 @@ func load(options Options, store SecretStore, resolveSecrets bool) (Settings, er
 		return Settings{}, err
 	}
 
-	profile := firstNonEmpty(options.Profile, os.Getenv("J4A_PROFILE"))
+	profile := firstNonEmpty(options.Profile, os.Getenv("JIRO_PROFILE"))
 	values := file.Default
 	if profile != "" {
 		selected, ok := file.Profiles[profile]
@@ -220,10 +220,10 @@ func configPath(options Options) (string, error) {
 	if options.ConfigPath != "" {
 		return options.ConfigPath, nil
 	}
-	if path := os.Getenv("J4A_CONFIG_FILE"); path != "" {
+	if path := os.Getenv("JIRO_CONFIG_FILE"); path != "" {
 		return path, nil
 	}
-	if path := os.Getenv("J4A_CONFIG"); path != "" {
+	if path := os.Getenv("JIRO_CONFIG"); path != "" {
 		return path, nil
 	}
 	return DefaultPath()
@@ -342,9 +342,9 @@ func validateCredential(settings Settings) error {
 
 func explicitEnvSecret(auth AuthType) string {
 	if auth == AuthPAT {
-		return os.Getenv("J4A_TOKEN")
+		return os.Getenv("JIRO_TOKEN")
 	}
-	return os.Getenv("J4A_PASSWORD")
+	return os.Getenv("JIRO_PASSWORD")
 }
 
 func optionSecret(options Options, auth AuthType) string {
@@ -481,19 +481,19 @@ func mergeProfile(base, override values) values {
 
 func environmentValues() (values, error) {
 	var result values
-	result.host = envString("J4A_HOST")
-	result.username = envString("J4A_USERNAME")
-	result.authType = envString("J4A_AUTH_TYPE")
-	result.password = envString("J4A_PASSWORD")
-	result.token = envString("J4A_TOKEN")
+	result.host = envString("JIRO_HOST")
+	result.username = envString("JIRO_USERNAME")
+	result.authType = envString("JIRO_AUTH_TYPE")
+	result.password = envString("JIRO_PASSWORD")
+	result.token = envString("JIRO_TOKEN")
 	var err error
-	if result.apiVersion, err = envInt("J4A_API_VERSION"); err != nil {
+	if result.apiVersion, err = envInt("JIRO_API_VERSION"); err != nil {
 		return values{}, err
 	}
-	if result.readOnly, err = envBool("J4A_READ_ONLY"); err != nil {
+	if result.readOnly, err = envBool("JIRO_READ_ONLY"); err != nil {
 		return values{}, err
 	}
-	if result.useKeyring, err = envBool("J4A_USE_KEYRING"); err != nil {
+	if result.useKeyring, err = envBool("JIRO_USE_KEYRING"); err != nil {
 		return values{}, err
 	}
 	return result, nil

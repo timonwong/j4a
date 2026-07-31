@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/timonwong/j4a/internal/apperr"
+	"github.com/timonwong/jiro/internal/apperr"
 )
 
 // Myself returns the authenticated Jira user.

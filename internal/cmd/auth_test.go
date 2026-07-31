@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/timonwong/j4a/internal/config"
+	"github.com/timonwong/jiro/internal/config"
 )
 
 type promptAnswer struct {
@@ -178,10 +178,10 @@ func TestLoginNonTTYEnvironmentAndStdin(t *testing.T) {
 		clearCommandEnv(t)
 		server := authenticatedServer(t, config.AuthBasic, "alice", "env-password", http.StatusOK)
 		defer server.Close()
-		t.Setenv("J4A_HOST", server.URL)
-		t.Setenv("J4A_AUTH_TYPE", "basic")
-		t.Setenv("J4A_USERNAME", "alice")
-		t.Setenv("J4A_PASSWORD", "env-password")
+		t.Setenv("JIRO_HOST", server.URL)
+		t.Setenv("JIRO_AUTH_TYPE", "basic")
+		t.Setenv("JIRO_USERNAME", "alice")
+		t.Setenv("JIRO_PASSWORD", "env-password")
 		path := filepath.Join(t.TempDir(), "config.toml")
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 		code := Execute([]string{"--config", path, "-ojson", "login", "--use-keyring=false"}, strings.NewReader("stdin-password"), stdout, stderr)
@@ -302,7 +302,7 @@ func TestLoginLogoutRawAndLogoutIdempotence(t *testing.T) {
 	if code := a.execute([]string{"--config", path, "--host", server.URL, "--auth-type", "pat", "login"}); code != 0 {
 		t.Fatalf("login code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	t.Setenv("J4A_TOKEN", "environment-token")
+	t.Setenv("JIRO_TOKEN", "environment-token")
 
 	for index, wantRemoved := range []bool{true, false} {
 		stdout.Reset()

@@ -9,12 +9,12 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/timonwong/j4a/internal/apperr"
+	"github.com/timonwong/jiro/internal/apperr"
 )
 
 var customFieldID = regexp.MustCompile(`^customfield_[0-9]+$`)
 
-// ResolveCustomField resolves a j4a custom field alias against this Jira
+// ResolveCustomField resolves a jiro custom field alias against this Jira
 // instance. A canonical custom field ID never causes a /field lookup.
 func (c *Client) ResolveCustomField(ctx context.Context, alias string) (string, error) {
 	if customFieldID.MatchString(alias) {
@@ -58,7 +58,7 @@ func ResolveCustomField(alias string, fields []Field) (string, error) {
 	}
 }
 
-// Slug turns a Jira field display name into its j4a alias. Unicode letters and
+// Slug turns a Jira field display name into its jiro alias. Unicode letters and
 // numbers are retained; every run of separators becomes one hyphen.
 func Slug(name string) string {
 	var result []rune

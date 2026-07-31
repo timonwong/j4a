@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/timonwong/j4a/internal/apperr"
+	"github.com/timonwong/jiro/internal/apperr"
 )
 
 const (
@@ -39,7 +39,7 @@ func LoadDraft(options Options) (Draft, error) {
 		return Draft{}, err
 	}
 
-	profile := firstNonEmpty(options.Profile, os.Getenv("J4A_PROFILE"))
+	profile := firstNonEmpty(options.Profile, os.Getenv("JIRO_PROFILE"))
 	persisted := file.Default
 	exists := file.DefaultExists
 	if profile != "" {
@@ -152,7 +152,7 @@ func CommitLogin(draft Draft, candidate Settings, store SecretStore) error {
 }
 
 // Logout removes only the selected Profile's persisted credential. Profile
-// selection honors --profile/J4A_PROFILE, while storage selection deliberately
+// selection honors --profile/JIRO_PROFILE, while storage selection deliberately
 // ignores all other environment and command-line overrides.
 func Logout(options Options, store SecretStore) (LogoutResult, error) {
 	path, err := configPath(options)
@@ -163,7 +163,7 @@ func Logout(options Options, store SecretStore) (LogoutResult, error) {
 	if err != nil {
 		return LogoutResult{}, err
 	}
-	profile := firstNonEmpty(options.Profile, os.Getenv("J4A_PROFILE"))
+	profile := firstNonEmpty(options.Profile, os.Getenv("JIRO_PROFILE"))
 	target := file.Default
 	persisted := file.Default
 	exists := file.DefaultExists

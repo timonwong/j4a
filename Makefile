@@ -1,7 +1,7 @@
 .PHONY: build test test-race vet fmt fmt-check check clean
 
 build:
-	go build -o bin/j4a ./cmd/j4a
+	go build -o bin/jiro ./cmd/jiro
 
 test:
 	go test ./...

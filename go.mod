@@ -1,4 +1,4 @@
-module github.com/timonwong/j4a
+module github.com/timonwong/jiro
 
 go 1.26.0
 

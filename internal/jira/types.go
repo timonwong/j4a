@@ -8,7 +8,7 @@ type Page struct {
 	MaxResults int `json:"maxResults"`
 }
 
-// User is a Jira user in j4a's stable representation.
+// User is a Jira user in jiro's stable representation.
 type User struct {
 	AccountID    string `json:"accountId"`
 	Username     string `json:"username"`

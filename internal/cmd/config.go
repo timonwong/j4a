@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/timonwong/j4a/internal/apperr"
-	"github.com/timonwong/j4a/internal/config"
-	"github.com/timonwong/j4a/internal/jira"
-	"github.com/timonwong/j4a/internal/output"
+	"github.com/timonwong/jiro/internal/apperr"
+	"github.com/timonwong/jiro/internal/config"
+	"github.com/timonwong/jiro/internal/jira"
+	"github.com/timonwong/jiro/internal/output"
 	"golang.org/x/term"
 )
 
@@ -143,12 +143,12 @@ func (a *app) logoutCommand() *cobra.Command {
 			}
 			selectedProfile := a.profile
 			if selectedProfile == "" {
-				selectedProfile = os.Getenv("J4A_PROFILE")
+				selectedProfile = os.Getenv("JIRO_PROFILE")
 			}
 			result := logoutResult{
 				Profile: profileName(selectedProfile), CredentialStore: removed.CredentialStore,
 				CredentialRemoved:           removed.CredentialRemoved,
-				EnvironmentCredentialActive: os.Getenv("J4A_PASSWORD") != "" || os.Getenv("J4A_TOKEN") != "",
+				EnvironmentCredentialActive: os.Getenv("JIRO_PASSWORD") != "" || os.Getenv("JIRO_TOKEN") != "",
 			}
 			return a.render(result, output.Table{
 				Headers: []string{"FIELD", "VALUE"},
@@ -172,7 +172,7 @@ func (a *app) loginCandidate(draft config.Draft, useKeyring bool) (config.Settin
 	if candidate.APIVersion == 0 {
 		candidate.APIVersion = 2
 	}
-	if !draft.Exists && !a.terminal.IsTerminal() && strings.TrimSpace(a.authType) == "" && strings.TrimSpace(os.Getenv("J4A_AUTH_TYPE")) == "" {
+	if !draft.Exists && !a.terminal.IsTerminal() && strings.TrimSpace(a.authType) == "" && strings.TrimSpace(os.Getenv("JIRO_AUTH_TYPE")) == "" {
 		candidate.AuthType = ""
 	}
 
@@ -226,7 +226,7 @@ func (a *app) loginCandidate(draft config.Draft, useKeyring bool) (config.Settin
 
 func normalizeLoginFields(candidate *config.Settings) error {
 	if candidate.APIVersion != 2 {
-		return apperr.New(apperr.KindConfig, "j4a v1 supports Jira REST API version 2 only")
+		return apperr.New(apperr.KindConfig, "jiro v1 supports Jira REST API version 2 only")
 	}
 	if strings.TrimSpace(candidate.Host) == "" {
 		return apperr.New(apperr.KindInvalidInput, "host is required")
@@ -246,9 +246,9 @@ func normalizeLoginFields(candidate *config.Settings) error {
 }
 
 func (a *app) nonTerminalSecret(auth config.AuthType) (string, error) {
-	name := "J4A_PASSWORD"
+	name := "JIRO_PASSWORD"
 	if auth == config.AuthPAT {
-		name = "J4A_TOKEN"
+		name = "JIRO_TOKEN"
 	}
 	if secret := os.Getenv(name); secret != "" {
 		return secret, nil

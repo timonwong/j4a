@@ -1,4 +1,4 @@
-// Package output renders stable j4a command results.
+// Package output renders stable jiro command results.
 package output
 
 import (
@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/timonwong/j4a/internal/apperr"
+	"github.com/timonwong/jiro/internal/apperr"
 )
 
 // Format selects the result representation.
