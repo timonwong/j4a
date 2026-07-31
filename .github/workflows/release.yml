@@ -9,14 +9,15 @@ permissions:
   contents: read
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  validate-tag:
+    runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Verify tag commit is on main
         shell: bash
@@ -27,16 +28,93 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-go@v5
+  verify:
+    needs: validate-tag
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  release-smoke:
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: Check
-        run: make check
+      - name: Build release candidate
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.17.1
+          args: release --skip=publish --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify release candidate
+        shell: bash
+        run: |
+          expected_assets=(
+            "j4a_${GITHUB_REF_NAME}_darwin_amd64"
+            "j4a_${GITHUB_REF_NAME}_darwin_arm64"
+            "j4a_${GITHUB_REF_NAME}_linux_amd64"
+            "j4a_${GITHUB_REF_NAME}_linux_arm64"
+            "j4a_${GITHUB_REF_NAME}_windows_amd64.exe"
+            "j4a_${GITHUB_REF_NAME}_windows_arm64.exe"
+          )
+          mapfile -t actual_assets < <(
+            jq -r '.[] | select(.extra.Format == "binary") | .name' dist/artifacts.json | sort
+          )
+          if [[ "${actual_assets[*]}" != "${expected_assets[*]}" ]]; then
+            echo "Release assets do not match the expected OS/architecture matrix." >&2
+            printf 'Expected: %s\n' "${expected_assets[*]}" >&2
+            printf 'Actual:   %s\n' "${actual_assets[*]}" >&2
+            exit 1
+          fi
+
+          checksum="dist/j4a_${GITHUB_REF_NAME}_checksums.txt"
+          if [[ ! -f "$checksum" ]] || [[ $(wc -l < "$checksum") -ne 6 ]]; then
+            echo "Expected one checksum entry for each release binary." >&2
+            exit 1
+          fi
+
+          binary="$(
+            jq -r '.[] | select(.extra.Format == "binary" and .goos == "linux" and .goarch == "amd64") | .path' \
+              dist/artifacts.json
+          )"
+          expected="j4a version ${GITHUB_REF_NAME#v}"
+          actual="$("$binary" --version)"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "Version output $actual does not match $expected." >&2
+            exit 1
+          fi
+
+  release:
+    needs: release-smoke
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Release
-        uses: goreleaser/goreleaser-action@v7.2.3
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: v2.17.1
