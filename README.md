@@ -153,7 +153,6 @@ jiro field
 Core examples:
 
 ```sh
-jiro myself
 jiro issue list --project OPS --status "In Progress"
 jiro issue list --resolution unresolved --reporter me --label agent --component API
 jiro issue list --sprint active --created -7d --updated 'startOfWeek()'

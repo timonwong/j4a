@@ -46,31 +46,6 @@ func (a *app) searchCommand() *cobra.Command {
 	return command
 }
 
-func (a *app) myselfCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "myself",
-		Short: "Show the authenticated Jira user",
-		Args:  exactArgs(0),
-		RunE: func(command *cobra.Command, _ []string) error {
-			client, _, err := a.client()
-			if err != nil {
-				return err
-			}
-			user, err := client.Myself(command.Context())
-			if err != nil {
-				return err
-			}
-			return a.render(user, output.Table{
-				Headers: []string{"FIELD", "VALUE"},
-				Rows: [][]string{
-					{"Username", user.Username}, {"Display Name", user.DisplayName},
-					{"Email", user.EmailAddress}, {"Active", stringValue(user.Active)},
-				},
-			})
-		},
-	}
-}
-
 func (a *app) projectCommand() *cobra.Command {
 	command := &cobra.Command{Use: "project", Short: "Work with Jira projects"}
 	command.AddCommand(a.projectsListCommand(), a.projectShowCommand())

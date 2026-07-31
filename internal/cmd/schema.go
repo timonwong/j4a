@@ -74,7 +74,6 @@ func schemaDocument() cliSchema {
 			{Name: "auth login", Auth: false, Mutating: true, Flags: []flagSchema{flagDefault("use-keyring", "", "boolean", true)}, JSONData: object("profile", "host", "authType", "credentialStore", "user")},
 			{Name: "auth logout", Auth: false, Mutating: true, JSONData: object("profile", "credentialStore", "credentialRemoved", "environmentCredentialActive")},
 			{Name: "auth status", Auth: true, Mutating: false, JSONData: object("profile", "instance", "authType", "user")},
-			command("myself", false, "", object("accountId", "username", "displayName", "emailAddress", "active")),
 			commandWithFlags("issue list", nil, false, "", []flagSchema{
 				flag("project", "p", "string"), flag("status", "", "string"), flag("assignee", "", "string"),
 				flag("type", "t", "string"), flag("resolution", "", "string"), flag("reporter", "", "string"),

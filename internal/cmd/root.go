@@ -96,7 +96,6 @@ func (a *app) rootCommand() *cobra.Command {
 		a.projectCommand(),
 		a.fieldCommand(),
 		a.searchCommand(),
-		a.myselfCommand(),
 		a.schemaCommand(),
 	)
 	a.configureCompletions(root)
