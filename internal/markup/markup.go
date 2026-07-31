@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/yuin/goldmark"
@@ -153,6 +154,9 @@ const codeSpanEscapedDelimiters = `{}[]|-*_`
 func (r jiraMarkupRenderer) renderDocument(document ast.Node) (string, error) {
 	blocks := make([]string, 0, document.ChildCount())
 	for node := document.FirstChild(); node != nil; node = node.NextSibling() {
+		if _, isReferenceDefinition := node.(*ast.LinkReferenceDefinition); isReferenceDefinition {
+			continue
+		}
 		block, err := r.renderBlock(node)
 		if err != nil {
 			return "", err
@@ -277,12 +281,7 @@ func (r jiraMarkupRenderer) renderInlines(parent ast.Node, atLineStart bool) (st
 func (r jiraMarkupRenderer) renderInline(node ast.Node, atLineStart bool) (string, error) {
 	switch typed := node.(type) {
 	case *ast.Text:
-		value := typed.Segment.Value(r.source)
-		if !typed.IsRaw() {
-			value = util.UnescapePunctuations(value)
-			value = util.ResolveNumericReferences(value)
-			value = util.ResolveEntityNames(value)
-		}
+		value := decodedMarkdownText(typed.Segment.Value(r.source), typed.IsRaw())
 		content := escapeUserTextForJiraMarkup(value, atLineStart)
 		if typed.HardLineBreak() {
 			return content + "\\\\\n", nil
@@ -305,11 +304,155 @@ func (r jiraMarkupRenderer) renderInline(node ast.Node, atLineStart bool) (strin
 		return r.renderDelimitedInline(typed, delimiter)
 	case *extensionast.Strikethrough:
 		return r.renderDelimitedInline(typed, "-")
+	case *ast.Link:
+		label, err := r.renderInlines(typed, false)
+		if err != nil {
+			return "", err
+		}
+		destination, err := r.validateDestination(typed, markdownDestination(typed.Destination))
+		if err != nil {
+			return "", err
+		}
+		return "[" + label + "|" + escapeLinkDestination(destination) + "]", nil
+	case *ast.AutoLink:
+		label := typed.Label(r.source)
+		destination := typed.URL(r.source)
+		if typed.AutoLinkType == ast.AutoLinkEmail && !bytes.HasPrefix(bytes.ToLower(destination), []byte("mailto:")) {
+			destination = append([]byte("mailto:"), destination...)
+		}
+		destination, err := r.validateDestination(typed, destination)
+		if err != nil {
+			return "", err
+		}
+		return "[" + escapeUserTextForJiraMarkup(label, false) + "|" + escapeLinkDestination(destination) + "]", nil
+	case *ast.Image:
+		alt := r.imageAltText(typed)
+		destination, err := r.validateDestination(typed, markdownDestination(typed.Destination))
+		if err != nil {
+			return "", err
+		}
+		markup := "!" + escapeImageDestination(destination)
+		if alt != "" {
+			markup += "|alt=" + escapeImageAttribute(alt)
+		}
+		return markup + "!", nil
 	case *ast.RawHTML:
 		return escapeUserTextForJiraMarkup(typed.Segments.Value(r.source), atLineStart), nil
 	default:
 		return "", r.unsupported(node)
 	}
+}
+
+func markdownDestination(value []byte) []byte {
+	return decodedMarkdownText(value, false)
+}
+
+func decodedMarkdownText(value []byte, raw bool) []byte {
+	if raw {
+		return value
+	}
+	value = util.UnescapePunctuations(value)
+	value = util.ResolveNumericReferences(value)
+	return util.ResolveEntityNames(value)
+}
+
+func escapeLinkDestination(value []byte) string {
+	return escapeJiraDelimitedValue(string(value), `\[]|`)
+}
+
+func escapeImageDestination(value []byte) string {
+	return escapeJiraDelimitedValue(string(value), `\!|`)
+}
+
+func escapeImageAttribute(value string) string {
+	return escapeJiraDelimitedValue(value, `\!|,=`)
+}
+
+func escapeJiraDelimitedValue(value, delimiters string) string {
+	var result strings.Builder
+	for _, character := range value {
+		if strings.ContainsRune(delimiters, character) {
+			result.WriteByte('\\')
+		}
+		result.WriteRune(character)
+	}
+	return result.String()
+}
+
+func (r jiraMarkupRenderer) imageAltText(image *ast.Image) string {
+	var result strings.Builder
+	var appendText func(ast.Node)
+	appendText = func(parent ast.Node) {
+		for child := parent.FirstChild(); child != nil; child = child.NextSibling() {
+			switch typed := child.(type) {
+			case *ast.Text:
+				result.Write(decodedMarkdownText(typed.Segment.Value(r.source), typed.IsRaw()))
+				if typed.SoftLineBreak() || typed.HardLineBreak() {
+					result.WriteByte(' ')
+				}
+			case *ast.String:
+				result.Write(decodedMarkdownText(typed.Value, typed.IsRaw() || typed.IsCode()))
+			case *ast.CodeSpan:
+				for textNode := typed.FirstChild(); textNode != nil; textNode = textNode.NextSibling() {
+					textValue := textNode.(*ast.Text).Segment.Value(r.source)
+					if bytes.HasSuffix(textValue, []byte("\n")) {
+						result.Write(textValue[:len(textValue)-1])
+						result.WriteByte(' ')
+					} else {
+						result.Write(textValue)
+					}
+				}
+			case *ast.AutoLink:
+				result.Write(typed.Label(r.source))
+			case *ast.RawHTML:
+				result.Write(typed.Segments.Value(r.source))
+			default:
+				appendText(typed)
+			}
+		}
+	}
+	appendText(image)
+	return result.String()
+}
+
+func (r jiraMarkupRenderer) validateDestination(node ast.Node, destination []byte) ([]byte, error) {
+	if character, unsafe := destinationControlCharacter(destination); unsafe {
+		return nil, r.conversionError(node, fmt.Sprintf("destination contains control character U+%04X", character))
+	}
+	if scheme, dangerous := dangerousDestinationScheme(destination); dangerous {
+		return nil, r.conversionError(node, fmt.Sprintf("dangerous destination scheme %q is not allowed", scheme))
+	}
+	return destination, nil
+}
+
+func dangerousDestinationScheme(destination []byte) (string, bool) {
+	separator := bytes.IndexByte(destination, ':')
+	if separator <= 0 {
+		return "", false
+	}
+	for index, character := range destination[:separator] {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(index > 0 && ((character >= '0' && character <= '9') || character == '+' || character == '-' || character == '.')) {
+			continue
+		}
+		return "", false
+	}
+	scheme := strings.ToLower(string(destination[:separator]))
+	switch scheme {
+	case "javascript", "vbscript", "data":
+		return scheme, true
+	default:
+		return "", false
+	}
+}
+
+func destinationControlCharacter(destination []byte) (rune, bool) {
+	for _, character := range string(destination) {
+		if unicode.IsControl(character) {
+			return character, true
+		}
+	}
+	return 0, false
 }
 
 func (r jiraMarkupRenderer) htmlBlockSource(block *ast.HTMLBlock) []byte {
