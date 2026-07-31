@@ -224,7 +224,22 @@ func (c *Client) MoveIssueToSprint(ctx context.Context, key string, input MoveIs
 	if err != nil {
 		return err
 	}
-	return c.do(ctx, http.MethodPost, "rest/agile/1.0/sprint/"+strconv.Itoa(sprint.ID)+"/issue", nil, map[string][]string{"issues": {key}}, nil)
+	return c.AddIssuesToSprint(ctx, sprint.ID, []string{key})
+}
+
+// AddIssuesToSprint moves issue keys to an already resolved Sprint ID.
+func (c *Client) AddIssuesToSprint(ctx context.Context, sprintID int, keys []string) error {
+	if sprintID <= 0 || len(keys) == 0 {
+		return apperr.New(apperr.KindInvalidInput, "positive sprint ID and at least one issue key are required")
+	}
+	issues := make([]string, len(keys))
+	for i, key := range keys {
+		issues[i] = strings.TrimSpace(key)
+		if issues[i] == "" {
+			return apperr.New(apperr.KindInvalidInput, "issue key is required")
+		}
+	}
+	return c.do(ctx, http.MethodPost, "rest/agile/1.0/sprint/"+strconv.Itoa(sprintID)+"/issue", nil, map[string][]string{"issues": issues}, nil)
 }
 
 func (c *Client) resolveSprint(ctx context.Context, spec string) (Sprint, error) {

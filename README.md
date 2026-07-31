@@ -142,53 +142,56 @@ printf '%s' "$JIRA_PAT" | jiro auth login \
 
 ## Commands
 
-Resource commands use plural canonical names and singular aliases:
+Resource namespaces use singular canonical names without aliases:
 
 ```text
-jiro issues|issue
-jiro projects|project
-jiro fields|field
+jiro issue
+jiro project
+jiro field
 ```
 
 Core examples:
 
 ```sh
 jiro myself
-jiro issues list --project OPS --status "In Progress"
-jiro issues list --resolution unresolved --reporter me --label agent --component API
-jiro issues list --sprint active --created -7d --updated 'startOfWeek()'
-jiro issues show OPS-42
+jiro issue list --project OPS --status "In Progress"
+jiro issue list --resolution unresolved --reporter me --label agent --component API
+jiro issue list --sprint active --created -7d --updated 'startOfWeek()'
+jiro issue show OPS-42
 jiro search 'project = OPS AND assignee = currentUser() ORDER BY updated DESC'
 
-jiro issues create --project OPS --type Bug --summary "Broken deployment" \
+jiro issue add --project OPS --type Bug --summary "Broken deployment" \
   --parent OPS-10 --component API --fix-version 4.5 --sprint active
-jiro issues update OPS-42 --priority High --component API --fix-version 4.5
-jiro issues update OPS-42 --component none  # clear all components
-jiro issues comment OPS-42 --body "Deployed to staging."
-jiro issues transition OPS-42 --to "In Review"
-jiro issues assign OPS-42 --assignee me
-jiro issues move OPS-42 --sprint active
+jiro issue update OPS-42 --priority High --component API --fix-version 4.5
+jiro issue update OPS-42 --component none --sprint active
+jiro issue comment add OPS-42 --body "Deployed to staging."
+jiro issue move OPS-42 --to "In Review"
+jiro issue assign OPS-42 --assignee me
 
-jiro issues link OPS-42 --to OPS-99 --type Blocks
-jiro issues links OPS-42
-jiro issues unlink 10001
+jiro issue link add OPS-42 --to OPS-99 --type Blocks
+jiro issue link list OPS-42
+jiro issue link delete 10001
+jiro issue link types
 
-jiro projects list
-jiro fields list --custom
-jiro cache fields refresh
+jiro project list
+jiro field list --custom
+jiro cache refresh
 ```
 
 Issue list filters are combined with `AND`; repeated `--label`, `--component`,
 and `--fix-version` values use JQL `IN`. `--resolution unresolved` means no
 resolution; `--assignee me` and `--reporter me` use Jira's `currentUser()`.
-For `issues list`, Sprint accepts `active`/`open`, `closed`, `future`, an ID,
+For `issue list`, Sprint accepts `active`/`open`, `closed`, `future`, an ID,
 or a name. An
 absolute `--created`/`--updated` date (`YYYY-MM-DD` or `YYYY/MM/DD`) selects
 that whole day; relative values such as `-7d` and allowlisted Jira date
 functions such as `startOfWeek()` select values on or after that operand.
 
-`issues create --sprint` creates the issue first and then moves it; a failed
-move never deletes the newly created issue. `issues update --component` and
+`issue add --sprint` creates the issue first and then moves it; a failed move
+never deletes the newly created issue. `issue update --sprint` resolves the
+Sprint before writing, updates ordinary fields first, and then moves the Issue;
+a failed Sprint move after an ordinary field update is reported as a partial
+failure. `issue update --component` and
 `--fix-version` replace the full field, while a single `none` clears it.
 Write-time Sprint specs accept a numeric ID, `active`, or a case-insensitive
 name substring and use the first match in Jira board/page order.
@@ -199,8 +202,8 @@ Use JQL-only selection for bulk operations. Exactly one of `--dry-run` and
 all matches by default.
 
 ```sh
-jiro issues bulk-transition --jql 'project = OPS AND status = Open' --to "In Progress" --dry-run
-jiro issues bulk-assign --jql 'project = OPS' --assignee me --yes
+jiro issue bulk move --jql 'project = OPS AND status = Open' --to "In Progress" --dry-run
+jiro issue bulk assign --jql 'project = OPS' --assignee me --yes
 ```
 
 ## Shell completion
@@ -234,7 +237,7 @@ mkdir -p ~/.config/fish/completions
 jiro completion fish > ~/.config/fish/completions/jiro.fish
 ```
 
-Completion covers commands, aliases, flags, enum values, local input paths,
+Completion covers commands, flags, enum values, local input paths,
 and named Profiles from the selected config file. It does not contact Jira or
 read credentials from the OS keyring.
 
@@ -243,10 +246,10 @@ read credentials from the OS keyring.
 Text is always the default. These forms are equivalent:
 
 ```sh
-jiro issues list -o json
-jiro issues list -ojson
-jiro issues list --output json
-jiro issues list --output=json
+jiro issue list -o json
+jiro issue list -ojson
+jiro issue list --output json
+jiro issue list --output=json
 ```
 
 Normalized JSON uses a stable envelope:
@@ -264,17 +267,13 @@ warnings without changing the exit code:
 
 Successful data is written to stdout. In JSON mode, structured failures are
 written to stderr and paired with stable exit codes. Human-readable warnings
-are written to stderr. `--raw` bypasses jiro's schema and emits the Jira REST
-response unchanged. For a partial result (exit code `7`), jiro first writes the
-complete normalized result to stdout, then writes a structured
+are written to stderr. jiro exposes only text and normalized JSON output; Jira
+wire responses are not part of the CLI contract. For a partial result (exit
+code `7`), jiro first writes the complete normalized result to stdout, then
+writes a structured
 `partial_failure` error to stderr. This includes a successful issue creation
 whose requested Sprint move failed and bulk runs with failed or unattempted
 items.
-
-`--raw` is unavailable for `issues create --sprint`, `issues bulk-transition`,
-and `issues bulk-assign`; these composite commands must retain normalized
-partial-result behavior. Single-request issue actions retain their raw Jira
-REST response behavior.
 
 `jiro schema` describes automation-facing Jira commands, flags, mutation
 status, output shapes, and exit codes as machine-readable JSON. Shell
@@ -285,7 +284,7 @@ completion commands emit shell code and are outside that contract.
 Pass custom fields with repeatable `--field key=value` flags:
 
 ```sh
-jiro issues create \
+jiro issue add \
   --project OPS \
   --type Story \
   --summary "Agent-friendly output" \
@@ -306,13 +305,13 @@ macOS uses `~/Library/Caches/jiro/fields/hosts/`. Refresh the current Principal'
 snapshot explicitly with:
 
 ```sh
-jiro cache fields refresh
+jiro cache refresh
 ```
 
 An expired snapshot is refreshed before use. If Jira cannot refresh it, jiro
 continues with the stale mapping, including for issue mutations, and emits a
-warning. `jiro fields list --custom` uses the same snapshot; the complete
-`fields list` and all `--raw` field requests remain live.
+warning. `jiro field list --custom` uses the same snapshot; the complete
+`field list` remains live.
 
 ## Jira markup and Markdown
 
@@ -320,7 +319,7 @@ Description and comment input is Jira markup by default. Convert Markdown only
 when explicitly requested:
 
 ```sh
-jiro issues create \
+jiro issue add \
   --project OPS \
   --type Task \
   --summary "Document rollout" \

@@ -23,9 +23,7 @@ type customFieldMetadata struct {
 
 func (a *app) cacheCommand() *cobra.Command {
 	command := &cobra.Command{Use: "cache", Short: "Manage local metadata caches"}
-	fields := &cobra.Command{Use: "fields", Aliases: []string{"field"}, Short: "Manage the custom field cache"}
-	fields.AddCommand(a.cacheFieldsRefreshCommand())
-	command.AddCommand(fields)
+	command.AddCommand(a.cacheFieldsRefreshCommand())
 	return command
 }
 
@@ -35,9 +33,6 @@ func (a *app) cacheFieldsRefreshCommand() *cobra.Command {
 		Short: "Refresh the current Principal's custom field cache",
 		Args:  exactArgs(0),
 		RunE: func(command *cobra.Command, _ []string) error {
-			if isRaw(a) {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for cache fields refresh")
-			}
 			client, settings, err := a.client()
 			if err != nil {
 				return err

@@ -49,7 +49,7 @@ func (a *app) issueBulkTransitionCommand() *cobra.Command {
 	var fields []string
 	var dryRun, yes bool
 	command := &cobra.Command{
-		Use:   "bulk-transition",
+		Use:   "move",
 		Short: "Transition every issue selected by JQL",
 		Args:  exactArgs(0),
 		RunE: func(command *cobra.Command, _ []string) error {
@@ -59,10 +59,6 @@ func (a *app) issueBulkTransitionCommand() *cobra.Command {
 			if dryRun == yes {
 				return apperr.New(apperr.KindInvalidInput, "exactly one of --dry-run or --yes is required")
 			}
-			if isRaw(a) {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for issues bulk-transition")
-			}
-
 			var client *jira.Client
 			var settings config.Settings
 			var err error
@@ -142,7 +138,7 @@ func (a *app) issueBulkAssignCommand() *cobra.Command {
 	var jql, assignee string
 	var dryRun, yes bool
 	command := &cobra.Command{
-		Use:   "bulk-assign",
+		Use:   "assign",
 		Short: "Assign every issue selected by JQL",
 		Args:  exactArgs(0),
 		RunE: func(command *cobra.Command, _ []string) error {
@@ -152,10 +148,6 @@ func (a *app) issueBulkAssignCommand() *cobra.Command {
 			if dryRun == yes {
 				return apperr.New(apperr.KindInvalidInput, "exactly one of --dry-run or --yes is required")
 			}
-			if isRaw(a) {
-				return apperr.New(apperr.KindInvalidInput, "--raw is not available for issues bulk-assign")
-			}
-
 			var client *jira.Client
 			var err error
 			if dryRun {

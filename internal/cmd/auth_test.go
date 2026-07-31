@@ -285,13 +285,9 @@ func TestLoginMissingInputAndUnauthorizedDoNotCommit(t *testing.T) {
 	})
 }
 
-func TestLoginLogoutRawAndLogoutIdempotence(t *testing.T) {
+func TestLoginLogoutAndLogoutIdempotence(t *testing.T) {
 	clearCommandEnv(t)
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	if code := Execute([]string{"--raw", "auth", "login"}, strings.NewReader(""), stdout, stderr); code != 2 || !strings.Contains(stderr.String(), "--raw is not available") {
-		t.Fatalf("raw login code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-
 	server := authenticatedServer(t, config.AuthPAT, "", "token", http.StatusOK)
 	defer server.Close()
 	path := filepath.Join(t.TempDir(), "config.toml")
@@ -323,11 +319,6 @@ func TestLoginLogoutRawAndLogoutIdempotence(t *testing.T) {
 		}
 	}
 
-	stdout.Reset()
-	stderr.Reset()
-	if code := Execute([]string{"--config", path, "--raw", "auth", "logout"}, strings.NewReader(""), stdout, stderr); code != 2 {
-		t.Fatalf("raw logout code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
 }
 
 func TestLogoutMissingProfileIsConfigError(t *testing.T) {
@@ -430,7 +421,7 @@ func TestAuthStatusUsesInjectedKeyringStore(t *testing.T) {
 	}
 }
 
-func TestAuthStatusFailuresAndRaw(t *testing.T) {
+func TestAuthStatusFailures(t *testing.T) {
 	t.Run("missing credential", func(t *testing.T) {
 		clearCommandEnv(t)
 		path := writeAuthConfig(t, "[default]\nhost = \"https://jira.example\"\nauth_type = \"pat\"\nuse_keyring = false\n")
@@ -466,14 +457,6 @@ func TestAuthStatusFailuresAndRaw(t *testing.T) {
 		}
 	})
 
-	t.Run("raw", func(t *testing.T) {
-		clearCommandEnv(t)
-		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-		code := Execute([]string{"--raw", "auth", "status"}, strings.NewReader(""), stdout, stderr)
-		if code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "--raw is not available for auth status") {
-			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-		}
-	})
 }
 
 func TestAuthCommandsOnlyAvailableUnderAuth(t *testing.T) {

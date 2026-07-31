@@ -1,11 +1,7 @@
 package cmd
 
 import (
-	"net/http"
-	"net/url"
-
 	"github.com/spf13/cobra"
-	"github.com/timonwong/jiro/internal/apperr"
 	"github.com/timonwong/jiro/internal/jira"
 	"github.com/timonwong/jiro/internal/output"
 )
@@ -25,12 +21,6 @@ func (a *app) searchCommand() *cobra.Command {
 			client, _, err := a.client()
 			if err != nil {
 				return err
-			}
-			if isRaw(a) {
-				if all {
-					return apperr.New(apperr.KindInvalidInput, "--all cannot be combined with --raw")
-				}
-				return a.rawRequest(command.Context(), client, http.MethodPost, "rest/api/2/search", nil, searchPayload(args[0], offset, limit, fields))
 			}
 			var result jira.SearchResult
 			if all {
@@ -66,9 +56,6 @@ func (a *app) myselfCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if isRaw(a) {
-				return a.rawRequest(command.Context(), client, http.MethodGet, "rest/api/2/myself", nil, nil)
-			}
 			user, err := client.Myself(command.Context())
 			if err != nil {
 				return err
@@ -84,8 +71,8 @@ func (a *app) myselfCommand() *cobra.Command {
 	}
 }
 
-func (a *app) projectsCommand() *cobra.Command {
-	command := &cobra.Command{Use: "projects", Aliases: []string{"project"}, Short: "Work with Jira projects"}
+func (a *app) projectCommand() *cobra.Command {
+	command := &cobra.Command{Use: "project", Short: "Work with Jira projects"}
 	command.AddCommand(a.projectsListCommand(), a.projectShowCommand())
 	return command
 }
@@ -103,9 +90,6 @@ func (a *app) projectsListCommand() *cobra.Command {
 			client, _, err := a.client()
 			if err != nil {
 				return err
-			}
-			if isRaw(a) {
-				return a.rawRequest(command.Context(), client, http.MethodGet, "rest/api/2/project", pageQuery(offset, limit), nil)
 			}
 			projects, err := client.ListProjects(command.Context(), jira.Page{StartAt: offset, MaxResults: limit})
 			if err != nil {
@@ -135,9 +119,6 @@ func (a *app) projectShowCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if isRaw(a) {
-				return a.rawRequest(command.Context(), client, http.MethodGet, "rest/api/2/project/"+url.PathEscape(args[0]), nil, nil)
-			}
 			project, err := client.ShowProject(command.Context(), args[0])
 			if err != nil {
 				return err
@@ -157,8 +138,8 @@ func (a *app) projectShowCommand() *cobra.Command {
 	}
 }
 
-func (a *app) fieldsCommand() *cobra.Command {
-	command := &cobra.Command{Use: "fields", Aliases: []string{"field"}, Short: "Inspect Jira fields"}
+func (a *app) fieldCommand() *cobra.Command {
+	command := &cobra.Command{Use: "field", Short: "Inspect Jira fields"}
 	command.AddCommand(a.fieldsListCommand())
 	return command
 }
@@ -173,12 +154,6 @@ func (a *app) fieldsListCommand() *cobra.Command {
 			client, settings, err := a.client()
 			if err != nil {
 				return err
-			}
-			if isRaw(a) {
-				if customOnly {
-					return apperr.New(apperr.KindInvalidInput, "--custom cannot be combined with --raw")
-				}
-				return a.rawRequest(command.Context(), client, http.MethodGet, "rest/api/2/field", nil, nil)
 			}
 			var fields []jira.Field
 			if customOnly {
