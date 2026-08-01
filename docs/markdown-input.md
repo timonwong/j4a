@@ -17,8 +17,8 @@ This document defines the conversion contract from Markdown Input to Jira Markup
 - Textual content, structural ownership, and block order must be preserved.
 - Conversion fails rather than silently reparenting, reordering, or dropping content.
 - Unsupported presentation metadata may be normalized or ignored: ordered lists start at one, table alignment and link or image titles are discarded, and unrecognized fence metadata is not emitted.
-- Lists support paragraph interruption plus tight nested and mixed marker chains.
-- Loose multi-block list items and list items containing additional block nodes such as fenced code or blockquotes fail conversion.
+- Lists support paragraph interruption, loose or tight items with nested lists, and mixed marker chains.
+- A list item may contain one text paragraph followed by nested lists. Additional paragraphs and block nodes such as fenced code or blockquotes fail conversion.
 - Blockquotes always use `{quote}` and may contain one or more paragraphs with inline formatting.
 - Nested blockquotes and blockquotes containing lists, tables, fenced code, or other non-paragraph blocks fail conversion.
 - Table cells may contain text, emphasis, strong text, strikethrough, inline code, and explicit links.

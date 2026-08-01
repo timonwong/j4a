@@ -134,6 +134,7 @@ func orderedListInterrupt(line []byte) (byte, int, bool) {
 
 const (
 	listItemBlockReason   = "list items may contain only text and nested lists"
+	looseListBlockReason  = "loose list items with multiple blocks are not supported"
 	blockquoteBlockReason = "blockquotes may contain only paragraphs"
 	maxCodeLines          = 20
 )
@@ -216,9 +217,6 @@ func (r jiraMarkupRenderer) renderBlockquote(blockquote *ast.Blockquote) (string
 }
 
 func (r jiraMarkupRenderer) renderList(list *ast.List, parentMarkers string) (string, error) {
-	if !list.IsTight {
-		return "", r.conversionError(list, "loose list items with multiple blocks are not supported")
-	}
 	marker := parentMarkers + "*"
 	if list.IsOrdered() {
 		marker = parentMarkers + "#"
@@ -232,7 +230,7 @@ func (r jiraMarkupRenderer) renderList(list *ast.List, parentMarkers string) (st
 		var content string
 		var nestedStart ast.Node
 		switch firstBlock := item.FirstChild().(type) {
-		case *ast.TextBlock:
+		case *ast.TextBlock, *ast.Paragraph:
 			var err error
 			content, err = r.renderInlines(firstBlock, false)
 			if err != nil {
@@ -253,6 +251,9 @@ func (r jiraMarkupRenderer) renderList(list *ast.List, parentMarkers string) (st
 		for block := nestedStart; block != nil; block = block.NextSibling() {
 			nestedList, ok := block.(*ast.List)
 			if !ok {
+				if _, isParagraph := block.(*ast.Paragraph); isParagraph {
+					return "", r.conversionError(list, looseListBlockReason)
+				}
 				return "", r.conversionError(block, listItemBlockReason)
 			}
 			nestedMarkup, err := r.renderList(nestedList, marker)
