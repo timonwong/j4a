@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"strings"
+
 	"github.com/spf13/cobra"
 	"github.com/timonwong/jiro/internal/output"
 )
@@ -17,13 +19,17 @@ type cliSchema struct {
 }
 
 type commandSchema struct {
-	Name     string         `json:"name"`
-	Aliases  []string       `json:"aliases,omitempty"`
-	Auth     bool           `json:"auth"`
-	Mutating bool           `json:"mutating"`
-	Args     string         `json:"args,omitempty"`
-	Flags    []flagSchema   `json:"flags,omitempty"`
-	JSONData map[string]any `json:"jsonData"`
+	Name                 string         `json:"name"`
+	Aliases              []string       `json:"aliases,omitempty"`
+	Auth                 bool           `json:"auth"`
+	Mutating             bool           `json:"mutating"`
+	MutationMode         string         `json:"mutationMode,omitempty"`
+	ReadOnlyMethods      []string       `json:"readOnlyMethods,omitempty"`
+	OutputMode           string         `json:"outputMode"`
+	SupportsGlobalOutput bool           `json:"supportsGlobalOutput"`
+	Args                 string         `json:"args,omitempty"`
+	Flags                []flagSchema   `json:"flags,omitempty"`
+	JSONData             map[string]any `json:"jsonData"`
 }
 
 type flagSchema struct {
@@ -71,9 +77,19 @@ func schemaDocument() cliSchema {
 		},
 		Commands: []commandSchema{
 			commandWithFlags("cache refresh", nil, true, "", nil, object("refreshed", "path", "fieldCount", "fetchedAt", "expiresAt", "instance", "principal")),
-			{Name: "auth login", Auth: false, Mutating: true, Flags: []flagSchema{flagDefault("use-keyring", "", "boolean", true)}, JSONData: object("profile", "host", "authType", "credentialStore", "user")},
-			{Name: "auth logout", Auth: false, Mutating: true, JSONData: object("profile", "credentialStore", "credentialRemoved", "environmentCredentialActive")},
-			{Name: "auth status", Auth: true, Mutating: false, JSONData: object("profile", "instance", "authType", "user")},
+			normalizedCommand(commandSchema{Name: "auth login", Auth: false, Mutating: true, Flags: []flagSchema{flagDefault("use-keyring", "", "boolean", true)}, JSONData: object("profile", "host", "authType", "credentialStore", "user")}),
+			normalizedCommand(commandSchema{Name: "auth logout", Auth: false, Mutating: true, JSONData: object("profile", "credentialStore", "credentialRemoved", "environmentCredentialActive")}),
+			normalizedCommand(commandSchema{Name: "auth status", Auth: true, Mutating: false, JSONData: object("profile", "instance", "authType", "user")}),
+			{
+				Name: "api", Auth: true, Mutating: true, MutationMode: "http_method",
+				ReadOnlyMethods: append([]string(nil), apiReadOnlyMethodNames...), OutputMode: "raw_http", SupportsGlobalOutput: false,
+				Args: "ENDPOINT", Flags: []flagSchema{
+					flagDefault("method", "X", "enum:"+strings.Join(apiMethods, "|"), "GET"),
+					flag("input", "", "path-or-stdin"), repeatableFlag("string-field", "f", "key=value"), repeatableFlag("field", "F", "key=value"),
+					repeatableFlag("form", "", "key=value"), repeatableFlag("header", "H", "header"),
+					flagDefault("timeout", "", "duration", "30s"), flag("insecure", "", "boolean"), flag("include", "i", "boolean"),
+				}, JSONData: nil,
+			},
 			commandWithFlags("issue list", nil, false, "", []flagSchema{
 				flag("project", "p", "string"), flag("status", "", "string"), flag("assignee", "", "string"),
 				flag("type", "t", "string"), flag("resolution", "", "string"), flag("reporter", "", "string"),
@@ -127,7 +143,7 @@ func schemaDocument() cliSchema {
 			}, object("projects")),
 			commandWithFlags("project show", nil, false, "PROJECT-KEY", nil, object("id", "key", "name", "description", "projectType", "lead")),
 			commandWithFlags("field list", nil, false, "", []flagSchema{flag("custom", "", "boolean")}, object("fields")),
-			{Name: "schema", Auth: false, Mutating: false, JSONData: object("contractVersion", "program", "platform", "globalFlags", "commands", "types", "output", "exitCodes")},
+			normalizedCommand(commandSchema{Name: "schema", Auth: false, Mutating: false, JSONData: object("contractVersion", "program", "platform", "globalFlags", "commands", "types", "output", "exitCodes")}),
 		},
 		Types: typeDefinitions(),
 		Output: outputSchema{
@@ -150,7 +166,13 @@ func command(name string, mutating bool, args string, data map[string]any) comma
 }
 
 func commandWithFlags(name string, aliases []string, mutating bool, args string, flags []flagSchema, data map[string]any) commandSchema {
-	return commandSchema{Name: name, Aliases: aliases, Auth: true, Mutating: mutating, Args: args, Flags: flags, JSONData: data}
+	return normalizedCommand(commandSchema{Name: name, Aliases: aliases, Auth: true, Mutating: mutating, Args: args, Flags: flags, JSONData: data})
+}
+
+func normalizedCommand(command commandSchema) commandSchema {
+	command.OutputMode = "normalized"
+	command.SupportsGlobalOutput = true
+	return command
 }
 
 func object(fields ...string) map[string]any {

@@ -206,6 +206,70 @@ jiro issue bulk move --jql 'project = OPS AND status = Open' --to "In Progress" 
 jiro issue bulk assign --jql 'project = OPS' --assignee me --yes
 ```
 
+## Raw Jira API requests
+
+`jiro api` sends one authenticated HTTP request to a complete relative endpoint
+of the effective Jira Instance. It reuses the selected Profile, Credential,
+authentication type, connection overrides, and any configured context path such
+as `/jira`; it does not call `/rest/api/2/myself` first or automatically add a
+`/rest/api/2/` prefix.
+
+```sh
+jiro api rest/api/2/myself
+jiro api 'rest/api/2/search?jql=project%20%3D%20OPS'
+jiro api rest/api/2/issue -F 'fields={"project":{"key":"OPS"},"summary":"Example","issuetype":{"name":"Task"}}'
+jiro api rest/api/2/issue/OPS-42 --method PATCH --input update.json
+jiro api rest/api/2/issue/OPS-42/attachments \
+  --form file=@artifact.zip \
+  -H 'X-Atlassian-Token: no-check'
+```
+
+The endpoint may start with `/` but must remain relative to the Jira Instance.
+Absolute or scheme-relative URLs, fragments, traversal segments, backslashes,
+and control characters are rejected. Supplying fields or a body changes the
+implicit method from GET to POST; `--method` accepts only GET, HEAD, OPTIONS,
+POST, PUT, PATCH, and DELETE. A `read_only` Profile permits only GET, HEAD, and
+OPTIONS, without an override.
+
+Request body modes are:
+
+- `--input FILE|-` streams bytes unchanged. With `--input`, fields are appended
+  to the query string.
+- `-f, --string-field key=value` always creates a JSON string.
+- `-F, --field key=value` decodes a complete JSON value and otherwise uses a
+  string; `@file` and `@-` read the value from a file or stdin. Fields form a
+  top-level JSON object, use command-line last-wins order for duplicate body
+  keys, and are limited to 16 MiB. GET, HEAD, and OPTIONS place fields in the
+  query string instead.
+- `--form key=value` creates multipart form data. `@file` and `@-` create file
+  parts, while `@@text` sends the text `@text`. Form mode is mutually exclusive
+  with the other body modes.
+
+Use repeatable `-H, --header 'Name: value'` for request headers. Authorization,
+Proxy-Authorization, Host, Content-Length, and User-Agent are managed by jiro
+and cannot be overridden. Defaults are `Accept: application/json`,
+`Accept-Encoding: identity`, and `Content-Type: application/json` when a
+non-form body exists; an empty header value removes an automatic default.
+
+Responses are raw Jira-owned bytes: any 2xx body is streamed unchanged to
+stdout, while a non-2xx body is streamed unchanged to stderr and returns the
+normal status-based exit code. `--include` prepends the final status and sorted
+headers with `Set-Cookie` values redacted. Global `--quiet` suppresses only a
+successful body; global `--output` is unsupported for `api`. There is no jq or
+template formatting, pagination, cache, retry, verbose trace, or output-file
+flag.
+
+The default timeout is 30 seconds and `--timeout 0` disables it. Only bodyless
+GET and HEAD requests follow redirects, limited to five and to the same scheme,
+host, and port. `--insecure` disables TLS certificate and hostname verification
+for this invocation only. This is unsafe and should be reserved for explicitly
+trusted Jira Instances with a known certificate problem; it is a silent no-op
+for HTTP Instances.
+
+Transport access to arbitrary plugin or version paths does not add Jira Cloud
+REST API v3 support. Jira Data Center and Server REST API v2 remain jiro's
+canonical compatibility target.
+
 ## Shell completion
 
 `jiro` uses Cobra's native completion support for Bash, Zsh, Fish, and
@@ -289,8 +353,8 @@ warnings without changing the exit code:
 
 Successful data is written to stdout. In JSON mode, structured failures are
 written to stderr and paired with stable exit codes. Human-readable warnings
-are written to stderr. jiro exposes only text and normalized JSON output; Jira
-wire responses are not part of the CLI contract. For a partial result (exit
+are written to stderr. Typed commands expose only text and normalized JSON;
+`jiro api` is the explicit raw HTTP exception documented above. For a partial result (exit
 code `7`), jiro first writes the complete normalized result to stdout, then
 writes a structured
 `partial_failure` error to stderr. This includes a successful issue creation

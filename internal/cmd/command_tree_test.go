@@ -11,6 +11,7 @@ func TestCanonicalCommandTreeUsesSingularPaths(t *testing.T) {
 	root := (&app{}).rootCommand()
 
 	for _, path := range []string{
+		"api",
 		"cache refresh",
 		"field list",
 		"project list",

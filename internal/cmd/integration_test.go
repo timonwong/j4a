@@ -314,12 +314,16 @@ func TestSchema(t *testing.T) {
 			ExitCodes map[string]string `json:"exitCodes"`
 			Types     map[string]any    `json:"types"`
 			Commands  []struct {
-				Name     string         `json:"name"`
-				Aliases  []string       `json:"aliases"`
-				Auth     bool           `json:"auth"`
-				Mutating bool           `json:"mutating"`
-				JSONData map[string]any `json:"jsonData"`
-				Flags    []struct {
+				Name                 string         `json:"name"`
+				Aliases              []string       `json:"aliases"`
+				Auth                 bool           `json:"auth"`
+				Mutating             bool           `json:"mutating"`
+				MutationMode         string         `json:"mutationMode"`
+				ReadOnlyMethods      []string       `json:"readOnlyMethods"`
+				OutputMode           string         `json:"outputMode"`
+				SupportsGlobalOutput bool           `json:"supportsGlobalOutput"`
+				JSONData             map[string]any `json:"jsonData"`
+				Flags                []struct {
 					Name       string `json:"name"`
 					Type       string `json:"type"`
 					Repeatable bool   `json:"repeatable"`
@@ -335,8 +339,8 @@ func TestSchema(t *testing.T) {
 	if envelope.SchemaVersion != "1" || envelope.Data.ContractVersion != "3" || len(envelope.Data.Commands) == 0 {
 		t.Fatalf("schema = %+v", envelope)
 	}
-	if strings.Contains(stdout.String(), `"raw"`) {
-		t.Fatalf("removed raw contract remains in schema: %s", stdout.String())
+	if strings.Contains(stdout.String(), `"name":"raw"`) {
+		t.Fatalf("removed --raw flag remains in schema: %s", stdout.String())
 	}
 	if envelope.Data.Output.SchemaVersion != "1" ||
 		!strings.Contains(envelope.Data.Output.PartialFailure, "stdout") ||
@@ -349,9 +353,15 @@ func TestSchema(t *testing.T) {
 			t.Fatalf("schema type %s is missing: %#v", name, envelope.Data.Types)
 		}
 	}
-	commands := make(map[string]struct {
-		auth, mutating bool
-	})
+	type commandMetadata struct {
+		auth, mutating       bool
+		outputMode           string
+		supportsGlobalOutput bool
+		mutationMode         string
+		readOnlyMethods      []string
+		jsonData             map[string]any
+	}
+	commands := make(map[string]commandMetadata)
 	flags := make(map[string]map[string]struct {
 		repeatable   bool
 		required     bool
@@ -362,9 +372,11 @@ func TestSchema(t *testing.T) {
 		if len(command.Aliases) != 0 {
 			t.Fatalf("%s still exposes aliases %v", command.Name, command.Aliases)
 		}
-		commands[command.Name] = struct {
-			auth, mutating bool
-		}{command.Auth, command.Mutating}
+		commands[command.Name] = commandMetadata{
+			auth: command.Auth, mutating: command.Mutating, outputMode: command.OutputMode,
+			supportsGlobalOutput: command.SupportsGlobalOutput, mutationMode: command.MutationMode,
+			readOnlyMethods: command.ReadOnlyMethods, jsonData: command.JSONData,
+		}
 		flags[command.Name] = make(map[string]struct {
 			repeatable   bool
 			required     bool
@@ -387,6 +399,9 @@ func TestSchema(t *testing.T) {
 		if strings.HasPrefix(command.Name, "config") {
 			t.Fatalf("removed config command remains in schema: %q", command.Name)
 		}
+		if command.Name != "api" && (command.OutputMode != "normalized" || !command.SupportsGlobalOutput) {
+			t.Fatalf("%s output contract = mode %q supportsGlobalOutput=%t", command.Name, command.OutputMode, command.SupportsGlobalOutput)
+		}
 		if command.Name == "auth status" {
 			for _, field := range []string{"profile", "instance", "authType", "user"} {
 				if command.JSONData[field] == nil {
@@ -408,6 +423,16 @@ func TestSchema(t *testing.T) {
 			if !ok || item["current"] == nil || item["target"] == nil || item["outcome"] == nil {
 				t.Fatalf("%s item schema = %#v", command.Name, items[0])
 			}
+		}
+	}
+	api, ok := commands["api"]
+	if !ok || !api.auth || !api.mutating || api.outputMode != "raw_http" || api.supportsGlobalOutput ||
+		api.mutationMode != "http_method" || strings.Join(api.readOnlyMethods, ",") != "GET,HEAD,OPTIONS" || api.jsonData != nil {
+		t.Fatalf("api schema = %+v, present=%t", api, ok)
+	}
+	for _, name := range []string{"method", "input", "string-field", "field", "form", "header", "timeout", "insecure", "include"} {
+		if _, ok := flags["api"][name]; !ok {
+			t.Fatalf("api is missing --%s", name)
 		}
 	}
 	for _, name := range []string{"auth login", "auth logout"} {

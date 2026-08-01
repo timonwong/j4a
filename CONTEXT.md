@@ -67,3 +67,7 @@ _Avoid_: Relationship type, link name
 **Bulk Operation**:
 One requested action applied by jiro to every Issue selected by JQL, with an ordered outcome recorded for each Issue.
 _Avoid_: Transaction, batch endpoint
+
+**API Request**:
+One authenticated HTTP request sent by `jiro api` to a relative endpoint of the selected Jira Instance. Its response is Jira-owned wire data outside jiro's normalized schema.
+_Avoid_: Typed command, normalized response

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -26,6 +27,19 @@ func (a *app) configureCompletions(root *cobra.Command) {
 		cobra.CompletionWithDesc("text", "Human-readable output"),
 		cobra.CompletionWithDesc("json", "Versioned machine-readable output"),
 	))
+
+	api := mustFindCommand(root, "api")
+	descriptions := map[string]string{
+		http.MethodGet: "Retrieve a resource", http.MethodHead: "Retrieve response headers", http.MethodOptions: "Retrieve endpoint options",
+		http.MethodPost: "Create or invoke a resource", http.MethodPut: "Replace a resource", http.MethodPatch: "Update a resource",
+		http.MethodDelete: "Delete a resource",
+	}
+	methodCompletions := make([]cobra.Completion, 0, len(apiMethods))
+	for _, method := range apiMethods {
+		methodCompletions = append(methodCompletions, cobra.CompletionWithDesc(method, descriptions[method]))
+	}
+	mustRegisterFlagCompletion(api, "method", fixedCompletions(methodCompletions...))
+	mustRegisterFlagCompletion(api, "input", fileOrStdinCompletions)
 
 	issuesList := mustFindCommand(root, "issue", "list")
 	mustRegisterFlagCompletion(issuesList, "assignee", fixedCompletions(

@@ -53,6 +53,8 @@ host = "https://alpha.example"
 		want []string
 	}{
 		{"output", []string{"__complete", "--output", ""}, []string{"text\tHuman-readable output", "json\tVersioned machine-readable output", ":4"}},
+		{"api method", []string{"__complete", "api", "rest/api/2/myself", "--method", ""}, []string{"GET\tRetrieve a resource", "PATCH\tUpdate a resource", "DELETE\tDelete a resource", ":4"}},
+		{"api input", []string{"__complete", "api", "rest/api/2/import", "--input", ""}, []string{"-\tRead from stdin", ":0"}},
 		{"auth type", []string{"__complete", "--auth-type", ""}, []string{"basic\tUsername and password authentication", "pat\tPersonal Access Token authentication", ":4"}},
 		{"profiles", []string{"__complete", "--config", path, "--profile", ""}, []string{"alpha", "zeta", ":4"}},
 		{"auth commands", []string{"__complete", "auth", ""}, []string{"login\tAuthenticate and save a Jira Profile", "logout\tRemove a Jira Profile credential", "status\tVerify the current Jira authentication", ":4"}},

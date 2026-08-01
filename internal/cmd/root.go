@@ -2,6 +2,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -40,17 +42,43 @@ type app struct {
 // Execute runs jiro and returns a stable process exit code.
 func Execute(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	a := &app{stdin: stdin, stdout: stdout, stderr: stderr}
+	if isAPIInvocation(args) {
+		ctx, stop, signalCode := executionSignalContext()
+		defer stop()
+		return a.executeContext(ctx, args, signalCode)
+	}
 	return a.execute(args)
 }
 
 func (a *app) execute(args []string) int {
+	return a.executeContext(context.Background(), args, func() int { return 0 })
+}
+
+func (a *app) executeContext(ctx context.Context, args []string, signalCode func() int) int {
 	a.warnings = nil
 	if a.terminal == nil {
 		a.terminal = newLoginTerminal(a.stdin, a.stderr)
 	}
 	root := a.rootCommand()
+	root.SetContext(ctx)
 	root.SetArgs(args)
-	if err := root.Execute(); err != nil {
+	if isAPIInvocation(args) && hasExplicitOutputFlag(args) {
+		_, _ = fmt.Fprintln(a.stderr, "--output is not supported for api")
+		return 2
+	}
+	executed, err := root.ExecuteC()
+	if err != nil {
+		if isRawHTTPCommand(executed) {
+			if code := signalCode(); code != 0 && errors.Is(ctx.Err(), context.Canceled) {
+				_, _ = fmt.Fprintln(a.stderr, "request canceled")
+				return code
+			}
+			var rendered *apiRenderedError
+			if !errors.As(err, &rendered) {
+				_, _ = fmt.Fprintln(a.stderr, err)
+			}
+			return apperr.ExitCode(err)
+		}
 		renderer, renderErr := a.renderer()
 		if renderErr != nil {
 			err = renderErr
@@ -74,6 +102,12 @@ func (a *app) rootCommand() *cobra.Command {
 				_, err := output.ParseFormat(a.output)
 				return err
 			}
+			if isRawHTTPCommand(command) {
+				if flag := command.Flags().Lookup("output"); flag != nil && flag.Changed {
+					return apperr.New(apperr.KindInvalidInput, "--output is not supported for api")
+				}
+				return nil
+			}
 			_, err := a.renderer()
 			return err
 		},
@@ -95,6 +129,7 @@ func (a *app) rootCommand() *cobra.Command {
 	flags.BoolVar(&a.quiet, "quiet", false, "suppress successful text output")
 
 	root.AddCommand(
+		a.apiCommand(),
 		a.authCommand(),
 		a.cacheCommand(),
 		a.issueCommand(),
