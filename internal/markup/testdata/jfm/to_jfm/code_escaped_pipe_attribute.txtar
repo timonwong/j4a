@@ -1,0 +1,10 @@
+-- input.jira --
+{code:language=go|title=A\|B}
+code
+{code}
+-- want.md --
+:::code{language="go" title="A|B"}
+code
+:::
+-- warnings.json --
+[]

@@ -1,0 +1,12 @@
+-- input.md --
+> first
+>
+> second *italic*
+-- want.jira --
+{quote}
+first
+
+second _italic_
+{quote}
+-- warnings.json --
+[]

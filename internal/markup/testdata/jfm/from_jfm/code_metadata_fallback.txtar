@@ -1,0 +1,12 @@
+-- input.md --
+```go title=x
+code
+```
+-- want.jira --
+```go title=x
+code
+```
+-- warnings.json --
+[
+  {"Line":1,"Column":1,"Construct":"code-block","Reason":"fenced code info string contains unsupported metadata"}
+]

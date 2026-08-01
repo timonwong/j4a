@@ -1,0 +1,7 @@
+-- input.md --
+Empty
+-----
+-- want.jira --
+h2. Empty
+-- warnings.json --
+[]

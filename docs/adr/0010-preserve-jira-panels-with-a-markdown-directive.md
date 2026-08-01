@@ -1,0 +1,3 @@
+# Preserve Jira panels with a Markdown directive
+
+Jiro Flavored Markdown represents Jira Data Center and Server `{panel}` macros with a jiro-owned `:::panel{...}` container directive instead of degrading them into blockquotes or tables. The directive preserves panel identity, body structure, and Jira-owned title, border, and background metadata, using Jira's original attribute names such as `borderStyle`, `borderColor`, and `bgColor`; it deliberately does not adopt the unrelated ADF `panelType` model or a second kebab-case attribute vocabulary, accepting that ordinary Markdown renderers will not give the extension special presentation.

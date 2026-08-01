@@ -1,0 +1,9 @@
+-- input.md --
+[Docs][docs] and ![Logo][logo].
+
+[docs]: https://example.com
+[logo]: logo.png "Preview"
+-- want.jira --
+[Docs|https://example.com] and !logo.png|alt=Logo,title=Preview!.
+-- warnings.json --
+[]

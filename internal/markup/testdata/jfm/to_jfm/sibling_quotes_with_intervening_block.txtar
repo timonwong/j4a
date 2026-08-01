@@ -1,0 +1,18 @@
+-- input.jira --
+{quote}
+first
+{quote}
+
+between
+
+{quote}
+second
+{quote}
+-- want.md --
+> first
+
+between
+
+> second
+-- warnings.json --
+[]

@@ -12,6 +12,7 @@ require (
 	github.com/yuin/goldmark v1.8.5
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/term v0.45.0
+	golang.org/x/tools v0.39.0
 )
 
 require (

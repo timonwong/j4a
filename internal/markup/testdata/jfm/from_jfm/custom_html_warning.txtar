@@ -1,0 +1,8 @@
+-- input.md --
+<custom>value</custom>
+-- want.jira --
+<custom>value</custom>
+-- warnings.json --
+[
+  {"Line":1,"Column":1,"Construct":"html","Reason":"unsupported or malformed inline HTML remains literal"}
+]

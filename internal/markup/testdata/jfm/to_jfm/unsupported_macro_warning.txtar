@@ -1,0 +1,12 @@
+-- input.jira --
+{expand:title=More}
+*bold*
+{expand}
+-- want.md --
+{expand:title=More}
+**bold**
+{expand}
+-- warnings.json --
+[
+  {"Line":1,"Column":1,"Construct":"jira-macro","Reason":"unsupported Jira macro delimiters remain literal while its body is converted best-effort"}
+]

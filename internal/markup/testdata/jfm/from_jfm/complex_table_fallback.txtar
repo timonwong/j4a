@@ -1,0 +1,12 @@
+-- input.md --
+| A |
+| --- |
+| ![x](x.png) |
+-- want.jira --
+\| A \|
+\| \-\-\- \|
+\| \!\[x\](x.png) \|
+-- warnings.json --
+[
+  {"Line":1,"Column":1,"Construct":"table","Reason":"unsupported GFM table content remains literal"}
+]

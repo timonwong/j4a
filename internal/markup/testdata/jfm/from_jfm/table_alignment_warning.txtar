@@ -1,0 +1,11 @@
+-- input.md --
+| A | B |
+| :--- | ---: |
+| 1 | 2 |
+-- want.jira --
+||A||B||
+|1|2|
+-- warnings.json --
+[
+  {"Line":2,"Column":1,"Construct":"table","Reason":"Jira Markup cannot retain GFM table alignment"}
+]

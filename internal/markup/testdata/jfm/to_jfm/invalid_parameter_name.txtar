@@ -1,0 +1,12 @@
+-- input.jira --
+{panel:title=A|x.y=z}
+text
+{panel}
+-- want.md --
+{panel:title=A|x.y=z}
+text
+{panel}
+-- warnings.json --
+[
+  {"Line":1,"Column":16,"Construct":"jira-macro","Reason":"Jira parameter name cannot be represented by JFM attribute grammar; complete panel remains literal"}
+]

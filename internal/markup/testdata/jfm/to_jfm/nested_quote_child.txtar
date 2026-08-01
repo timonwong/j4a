@@ -1,0 +1,20 @@
+-- input.jira --
+{quote}
+outer
+
+{quote}
+inner
+{quote}
+
+tail
+{quote}
+-- want.md --
+> outer
+>
+> {quote} inner {quote}
+>
+> tail
+-- warnings.json --
+[
+  {"Line":4,"Column":1,"Construct":"blockquote","Reason":"unsupported block child inside Jira quote remains literal"}
+]

@@ -1,0 +1,6 @@
+-- input.md --
+:image[Fish]{src="fish.gif" thumbnail align="right" title="Preview"}
+-- want.jira --
+!fish.gif|alt=Fish,thumbnail,align=right,title=Preview!
+-- warnings.json --
+[]

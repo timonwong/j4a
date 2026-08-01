@@ -1,0 +1,6 @@
+-- input.md --
+![Architecture](img.png)
+-- want.jira --
+!img.png|alt=Architecture!
+-- warnings.json --
+[]

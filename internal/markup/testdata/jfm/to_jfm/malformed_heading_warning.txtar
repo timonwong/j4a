@@ -1,0 +1,8 @@
+-- input.jira --
+h7. Bad
+-- want.md --
+h7. Bad
+-- warnings.json --
+[
+  {"Line":1,"Column":1,"Construct":"heading","Reason":"malformed Jira heading remains literal"}
+]

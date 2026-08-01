@@ -1,0 +1,6 @@
+-- input.md --
+__bold__ _italic_ ***both*** ~~old~~ <ins>new</ins> <sup>sup</sup> <sub>sub</sub> <FONT COLOR='#0052CC'>blue</FONT>
+-- want.jira --
+*bold* _italic_ *_both_* -old- +new+ ^sup^ ~sub~ {color:#0052CC}blue{color}
+-- warnings.json --
+[]
