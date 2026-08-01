@@ -1,15 +1,15 @@
 ---
 name: jiro
-description: Manage Jira Data Center and Server with the jiro CLI. Use when the user wants to authenticate to Jira; inspect, search, create, update, assign, comment on, link, transition, or bulk-manage issues; inspect projects, fields, or custom-field metadata; or automate Jira through jiro's stable JSON contract.
+description: Manage Jira Data Center and Server with the jiro CLI. Use for profile authentication; issue search and mutation; project, field, transition, link, comment, or bulk workflows; automation through jiro's stable JSON contract; or authenticated raw Jira REST requests through jiro api.
 ---
 
 # Jiro
 
-Use `jiro` as the primary interface for Jira Data Center and Server. Work through the same control loop for every mutation: **inspect -> preflight -> mutate -> read back**. Finish only when the requested Jira state is visible in a read after the write.
+Use `jiro` as the primary interface for Jira Data Center and Server. For every mutation, follow **inspect -> preflight -> mutate -> read back**. Finish only when a read shows the requested Jira state.
 
 ## Establish the contract
 
-Run these local checks before relying on remembered syntax:
+Check the installed CLI before relying on remembered syntax:
 
 ```bash
 jiro --version
@@ -17,66 +17,48 @@ jiro schema --output=json
 jiro COMMAND --help
 ```
 
-Treat `jiro schema --output=json` as the source of truth for command names, flags, mutation status, output shapes, and exit codes. Use the singular resource namespaces `issue`, `project`, and `field`. jiro targets Jira Data Center and Server REST API v2; verify compatibility before acting on Jira Cloud or ADF data.
+Treat `jiro schema --output=json` as the source of truth for commands, flags, mutation status, output shapes, and exit codes. Use the singular resource namespaces `issue`, `project`, and `field`. jiro targets Jira Data Center and Server REST API v2; verify compatibility before acting on Jira Cloud or ADF data.
 
-Select a Profile explicitly when the task names one:
-
-```bash
-jiro --profile bot auth status --output=json
-```
-
-Run `jiro auth status --output=json` before Jira work when authentication or the selected Jira Instance is uncertain. Its success proves the effective Profile and Credential are accepted without exposing the secret.
-
-Authenticate interactively for the default or a named Profile:
-
-```bash
-jiro auth login
-jiro --profile bot auth login
-```
-
-For non-interactive login, use the atomic `JIRA_*` Credential contract or an explicit stdin mode. A non-empty `JIRA_TOKEN` selects PAT; otherwise `JIRA_USERNAME` and `JIRA_PASSWORD` must both be non-empty. `--password-stdin` requires `JIRA_USERNAME`, while `--token-stdin` selects PAT. Keep credentials out of command-line arguments:
-
-```bash
-printf '%s' "$JIRA_PAT" | JIRA_HOST=https://jira.example.com jiro --profile bot auth login --token-stdin --output=json
-```
-
-The OS keyring is the default credential store and each Profile owns an independent credential. Use `auth login --use-keyring=false` only when plaintext TOML storage is explicitly intended; jiro enforces mode `0600` on Unix-like systems. Remove only the selected Profile's persisted credential with `jiro --profile bot auth logout --output=json`, then inspect `environmentCredentialActive` because logout cannot remove credentials inherited from the shell.
+When the task involves authentication or Profile management, or the effective Jira Instance or Credential is uncertain or rejected, read [Authentication and profiles](references/authentication.md) before Jira work.
 
 ## Inspect
 
-Read the current state and the metadata that constrains the requested write. Use normalized JSON for automation and precise verification.
+Read the current state and the Jira-owned metadata that constrains the requested write. Use normalized JSON for automation and verification.
 
 ```bash
 jiro issue show OPS-42 --output=json
-jiro issue comment list OPS-42 --output=json
 jiro issue list-transitions OPS-42 --output=json
-jiro issue link list OPS-42 --output=json
 jiro issue link types --output=json
-jiro project show OPS --output=json
 jiro field list --custom --output=json
 ```
 
-For searches, use the structured filters when they express the request and JQL when they do not:
+Prefer structured filters when they express the search and JQL when they do not:
 
 ```bash
 jiro issue list --project OPS --status "In Progress" --assignee me --output=json
-jiro issue list --resolution unresolved --label agent --component API --all --output=json
 jiro search 'project = OPS AND updated >= -7d ORDER BY updated DESC' --all --output=json
 ```
 
-Confirm every target Issue Key, Jira Instance, current status, current assignee, relevant field value, transition, Link Type, and existing comment or link needed to judge the final state. An empty list is valid unless the user's request requires a match.
+Confirm every target Issue Key, Jira Instance, current status, assignee, relevant field value, transition, Link Type, and existing comment or link needed to judge the final state. Treat an empty list as valid unless the request requires a match.
 
 ## Preflight
 
-Resolve Jira-owned names and workflow choices before writing:
+Resolve Jira-owned names and write semantics before mutating:
 
 - Match a transition by the exact ID, unique name, or unique destination status returned by `issue list-transitions`.
 - Resolve a Link Type with `issue link types`; preserve the outward direction from `FROM` to `--to`.
-- Use `customfield_N` directly when its ID is known. Use a human alias only after `field list --custom` or `cache refresh` proves it is unique for the current Principal.
-- Determine whether description or comment input is Jira Markup or Markdown Input. The default is Jira Markup; request conversion explicitly with `--input-format=markdown`.
-- Use a file or `-` for stdin for long text. Keep inline and file forms mutually exclusive.
-- Resolve write-time Sprint input as a numeric ID, `active`, or a case-insensitive name substring. Check that the first match in Jira board/page order is the intended Sprint.
-- Treat `--component` and `--fix-version` on updates as full replacements. Use the single value `none` only when the requested final state is an empty field.
+- Use `customfield_N` directly when known. Use a human alias only after `field list --custom` or `cache refresh` proves it is unique for the current Jira Instance and Principal. Treat `stale_field_cache` as a verification risk: disclose it and verify the written field directly. Direct IDs bypass alias metadata.
+- Determine whether description or comment input is Jira Markup or Markdown Input. Jira Markup is the default; request conversion with `--input-format=markdown`.
+- Use a file or `-` for stdin for long text, keeping inline and file forms mutually exclusive.
+- Resolve Sprint input as a numeric ID, `active`, or a case-insensitive name substring. Confirm that the first match in Jira board/page order is intended.
+- Treat `--component` and `--fix-version` updates as full replacements. Use the single value `none` only for an empty final field.
+
+Refresh custom-field aliases when they are stale, missing, ambiguous, or workflow-sensitive:
+
+```bash
+jiro cache refresh --output=json
+jiro field list --custom --output=json
+```
 
 For bulk changes, preflight the complete JQL selection without changing Jira:
 
@@ -85,38 +67,16 @@ jiro issue bulk move --jql 'project = OPS AND status = Open' --to "In Progress" 
 jiro issue bulk assign --jql 'project = OPS' --assignee me --dry-run --output=json
 ```
 
-Review every returned item. Proceed only when the selection, targets, `ready` count, and any failures match the user's intended scope.
+Review every returned item. Proceed only when the selection, targets, `ready` count, and failures match the intended scope.
 
 ## Mutate
 
-Use only the operation and fields the user requested.
-
-### Create or update an issue
+Use only the operation and fields requested.
 
 ```bash
-jiro issue add \
-  --project OPS \
-  --type Bug \
-  --summary "Broken deployment" \
-  --description-file issue.md \
-  --input-format=markdown \
-  --component API \
-  --fix-version 4.5 \
-  --field story-points=5 \
-  --output=json
-
-jiro issue update OPS-42 \
-  --priority High \
-  --component API \
-  --fix-version 4.5 \
-  --output=json
-```
-
-`--field key=value` decodes the value as JSON first and otherwise uses a string. Quote object and array values so the shell passes valid JSON. When `issue add --sprint` creates the issue but cannot move it, preserve the returned Issue Key and report the partial failure; the created issue remains in Jira. An ordinary `issue update` followed by a failed Sprint move can likewise leave the ordinary fields updated.
-
-### Comment, transition, assign, or link
-
-```bash
+jiro issue add --project OPS --type Bug --summary "Broken deployment" \
+  --description-file issue.md --input-format=markdown --output=json
+jiro issue update OPS-42 --priority High --component API --fix-version 4.5 --output=json
 jiro issue comment add OPS-42 --body-file comment.md --input-format=markdown --output=json
 jiro issue move OPS-42 --to "Start Review" --field story-points=5 --output=json
 jiro issue assign OPS-42 --assignee me --output=json
@@ -125,71 +85,38 @@ jiro issue link add OPS-42 --to OPS-99 --type Blocks --output=json
 jiro issue link delete 10001 --output=json
 ```
 
-Use the transition identifier proven during preflight, even when another transition has a similar label. Delete an Issue Link by its Jira Link ID, not by either Issue Key.
+`--field key=value` decodes JSON first and otherwise uses a string; quote object and array values so the shell passes valid JSON. Use the transition proven during preflight. Delete an Issue Link by its Jira Link ID.
 
-### Execute a preflighted bulk change
+Preserve partial results. A failed Sprint move can leave a newly created issue or ordinary update fields in Jira; retain the returned Issue Key and updated fields when reporting the failure.
 
-After the user has authorized the actual broad write, repeat the same JQL and target with `--yes`:
+After the user authorizes a preflighted broad write, repeat the same JQL and target with `--yes`:
 
 ```bash
 jiro issue bulk move --jql 'project = OPS AND status = Open' --to "In Progress" --yes --output=json
 jiro issue bulk assign --jql 'project = OPS' --assignee me --yes --output=json
 ```
 
-Keep the dry-run result and execution result distinct. Bulk writes run serially and may return `failed` or `not_attempted` outcomes.
+Keep dry-run and execution results distinct. Bulk writes run serially and may return `failed` or `not_attempted` items.
 
 ## Read back
 
 Read every consequential result through jiro after the write:
 
 - Use `issue show` for creation, field updates, transitions, assignments, and Sprint membership fields returned by the instance.
-- Use `issue comment list` for added comments.
-- Use `issue link list` for added or removed links.
-- Retain the Issue Keys from a bulk dry-run and read back every targeted issue after execution; use a list/search read with the needed `--fields` only when it proves the same complete key set and final values.
+- Use `issue comment list` for comments and `issue link list` for link changes.
+- Retain the Issue Keys from a bulk dry-run and read back every targeted issue. A list or search read is sufficient only when it proves the same complete key set and final values.
 - Read normalized standard fields such as status and assignee from `.data.status` and `.data.assignee`. Request custom fields with `issue show --fields` and read them from `.data.fields`.
 
-A zero exit code is not the completion criterion; the requested state in the readback is. Treat a silently absent field or an unintended destination status as incomplete work.
+A zero exit code is not the completion criterion. Treat a missing field or unintended destination status as incomplete work.
 
 ## Interpret output and failures
 
-Text is the default. Use `--output=json` for agent or script consumption. Successful normalized data goes to stdout; structured errors go to stderr. Capture the streams separately.
+Text is the default. Use `--output=json` for agent or script consumption. Capture normalized stdout and structured stderr separately, and read exit-code meanings from the current schema.
 
-The stable exit codes are:
-
-- `0`: success
-- `1`: unexpected error
-- `2`: invalid input or configuration
-- `3`: authentication failed
-- `4`: resource not found
-- `5`: Jira API error
-- `6`: rate limited
-- `7`: partial failure
-
-Warnings describe a degraded success and do not change exit code `0`. On exit code `7`, jiro writes the complete normalized result to stdout before the structured error to stderr. Preserve and report both, including every succeeded, failed, and unattempted item. Typed commands expose no general raw-output mode; normalized JSON is their automation contract. `jiro api` is the sole raw HTTP exception.
+Warnings are degraded successes and retain a successful exit status. On partial failure, preserve and report the complete normalized result from stdout and the structured error from stderr, including every succeeded, failed, and unattempted item.
 
 Pause after permission errors, missing or ambiguous metadata, rate limiting, or uncertain output. Determine whether Jira applied the write before retrying.
 
-## Refresh custom-field metadata
+## REST fallback
 
-Human aliases use a disposable snapshot scoped to the normalized Jira Instance and authenticated Principal. Refresh it when aliases are stale, missing, ambiguous, or workflow-sensitive:
-
-```bash
-jiro cache refresh --output=json
-jiro field list --custom --output=json
-```
-
-An expired snapshot may be used with a `stale_field_cache` warning when refresh fails. Treat that warning as a reason to disclose the risk and verify the written field directly. Direct `customfield_N` IDs bypass alias metadata.
-
-## Use a bounded REST fallback
-
-Use `jiro api` only after `jiro schema --output=json` and the relevant typed-command help prove that jiro lacks the requested operation. State that the fallback returns Jira's raw, version-dependent response rather than jiro's normalized contract.
-
-Before sending a REST request:
-
-1. Identify the installed Jira product and version, then consult the matching authoritative [Jira Data Center REST API documentation](https://developer.atlassian.com/server/jira/platform/about-the-jira-server-rest-apis/). Use the Jira Software API documentation for software-specific resources.
-2. Reuse the selected Profile, or use the atomic environment contract: non-empty `JIRA_TOKEN`, otherwise both `JIRA_USERNAME` and `JIRA_PASSWORD`. `JIRA_HOST` may independently override the Jira Instance.
-3. Use `jiro api` so credentials are read at execution time and Authorization remains managed. Keep xtrace and verbose header logging disabled, and keep Authorization values out of command arguments and output.
-4. Use the configured HTTPS Jira base URL, including any context path, with normal certificate verification. Send PATs as Bearer credentials and Basic credentials according to Atlassian's [PAT](https://developer.atlassian.com/server/jira/platform/personal-access-token/) and [Basic Auth](https://developer.atlassian.com/server/jira/platform/basic-authentication/) guidance.
-5. Query endpoint and field metadata before a write, send the smallest payload that satisfies the request, and read the changed resource back through REST afterward.
-
-Treat Jira's response status and body as evidence, not as a stable jiro envelope. Stop and report the verified boundary when the endpoint, authentication path, required metadata, or final state cannot be established. Keep credentials in their provided environment source; leave jiro's TOML and OS keyring untouched. Keep the workflow jiro-first and REST-second rather than switching to another Jira CLI or browser UI.
+Continue with typed commands whenever they cover the request. When `jiro schema --output=json` and the relevant typed-command help prove that a required operation is unavailable, load [REST API fallback](references/rest-api-fallback.md) and follow it completely before issuing `jiro api`.
