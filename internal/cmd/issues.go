@@ -74,7 +74,7 @@ func (a *app) issuesListCommand() *cobra.Command {
 				return err
 			}
 			return a.render(result, output.Table{
-				Headers: []string{"KEY", "SUMMARY", "STATUS", "ASSIGNEE"},
+				Columns: []output.Column{output.Fixed("KEY"), output.Flexible("SUMMARY"), output.Flexible("STATUS"), output.Flexible("ASSIGNEE")},
 				Rows:    issueRows(result.Issues),
 			})
 		},
@@ -315,7 +315,10 @@ func (a *app) issueCommentsCommand() *cobra.Command {
 				rows = append(rows, []string{comment.ID, author, comment.Created, comment.Body})
 			}
 			data := map[string]any{"issueKey": args[0], "comments": comments}
-			return a.render(data, output.Table{Headers: []string{"ID", "AUTHOR", "CREATED", "BODY"}, Rows: rows})
+			return a.render(data, output.Table{
+				Columns: []output.Column{output.Fixed("ID"), output.Flexible("AUTHOR"), output.Flexible("CREATED"), output.Flexible("BODY")},
+				Rows:    rows,
+			})
 		},
 	}
 	command.Flags().IntVarP(&limit, "limit", "n", 50, "maximum comments")
@@ -387,7 +390,7 @@ func (a *app) issueTransitionsCommand() *cobra.Command {
 				rows = append(rows, []string{transition.ID, transition.Name, to})
 			}
 			return a.render(map[string]any{"issueKey": args[0], "transitions": transitions}, output.Table{
-				Headers: []string{"ID", "NAME", "TO"}, Rows: rows,
+				Columns: []output.Column{output.Fixed("ID"), output.Flexible("NAME"), output.Flexible("TO")}, Rows: rows,
 			})
 		},
 	}
@@ -499,7 +502,7 @@ func issueTable(issue jira.Issue) output.Table {
 		{"Parent", parent}, {"Components", joinNames(components)}, {"Fix Versions", joinNames(fixVersions)},
 		{"Description", issue.Description},
 	}
-	return output.Table{Headers: []string{"FIELD", "VALUE"}, Rows: rows}
+	return output.Table{Columns: []output.Column{output.Fixed("FIELD"), output.Flexible("VALUE")}, Rows: rows}
 }
 
 func matchTransition(target string, transitions []jira.Transition) (jira.Transition, error) {
