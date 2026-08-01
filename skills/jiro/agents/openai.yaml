@@ -1,0 +1,4 @@
+interface:
+  display_name: "Jiro"
+  short_description: "Manage Jira Data Center and Server with jiro"
+  default_prompt: "Use $jiro to inspect and manage Jira safely from the command line."
