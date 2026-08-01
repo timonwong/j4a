@@ -16,7 +16,7 @@ type outputTerminalDetector interface {
 type streamOutputTerminal struct{}
 
 func (streamOutputTerminal) Detect(writer io.Writer, force bool) output.Terminal {
-	if file, ok := writer.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
+	if file, ok := writer.(*os.File); ok && isTerminalFile(file) {
 		return output.Terminal{IsTTY: true, Width: terminalWidth(file)}
 	}
 	if !force {

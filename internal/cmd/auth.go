@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"github.com/timonwong/jiro/internal/apperr"
 	"github.com/timonwong/jiro/internal/config"
@@ -31,10 +32,15 @@ type streamLoginTerminal struct {
 
 func newLoginTerminal(input io.Reader, output io.Writer) loginTerminal {
 	terminal := &streamLoginTerminal{input: input, output: output, reader: bufio.NewReader(input)}
-	if file, ok := input.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
+	if file, ok := input.(*os.File); ok && isTerminalFile(file) {
 		terminal.file = file
 	}
 	return terminal
+}
+
+func isTerminalFile(file *os.File) bool {
+	fd := file.Fd()
+	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
 }
 
 func (t *streamLoginTerminal) IsTerminal() bool { return t.file != nil }
@@ -103,16 +109,21 @@ func (a *app) authCommand() *cobra.Command {
 
 func (a *app) authLoginCommand() *cobra.Command {
 	useKeyring := true
+	passwordStdin := false
+	tokenStdin := false
 	command := &cobra.Command{
 		Use:   "login",
 		Short: "Authenticate and save a Jira Profile",
 		Args:  exactArgs(0),
 		RunE: func(command *cobra.Command, _ []string) error {
+			if passwordStdin && tokenStdin {
+				return apperr.New(apperr.KindInvalidInput, "--password-stdin and --token-stdin are mutually exclusive")
+			}
 			draft, err := config.LoadDraft(a.configOptions())
 			if err != nil {
 				return err
 			}
-			candidate, err := a.loginCandidate(draft, useKeyring)
+			candidate, err := a.loginCandidate(draft, useKeyring, passwordStdin, tokenStdin)
 			if err != nil {
 				return err
 			}
@@ -139,6 +150,8 @@ func (a *app) authLoginCommand() *cobra.Command {
 		},
 	}
 	command.Flags().BoolVar(&useKeyring, "use-keyring", true, "store the credential in the OS keyring; false stores it in the 0600 config file")
+	command.Flags().BoolVar(&passwordStdin, "password-stdin", false, "read a Basic Auth password from stdin; requires JIRA_USERNAME")
+	command.Flags().BoolVar(&tokenStdin, "token-stdin", false, "read a Personal Access Token from stdin")
 	return command
 }
 
@@ -159,7 +172,7 @@ func (a *app) authLogoutCommand() *cobra.Command {
 			result := logoutResult{
 				Profile: profileName(selectedProfile), CredentialStore: removed.CredentialStore,
 				CredentialRemoved:           removed.CredentialRemoved,
-				EnvironmentCredentialActive: os.Getenv("JIRO_PASSWORD") != "" || os.Getenv("JIRO_TOKEN") != "",
+				EnvironmentCredentialActive: os.Getenv("JIRA_PASSWORD") != "" || os.Getenv("JIRA_TOKEN") != "",
 			}
 			return a.render(result, output.Table{
 				Columns: []output.Column{output.Fixed("FIELD"), output.Flexible("VALUE")},
@@ -203,7 +216,7 @@ func (a *app) authStatusCommand() *cobra.Command {
 	}
 }
 
-func (a *app) loginCandidate(draft config.Draft, useKeyring bool) (config.Settings, error) {
+func (a *app) loginCandidate(draft config.Draft, useKeyring, passwordStdin, tokenStdin bool) (config.Settings, error) {
 	candidate := draft.Settings
 	// Login credentials are always fresh. In particular, never reuse a secret
 	// from an existing Profile while constructing or verifying the candidate.
@@ -213,56 +226,119 @@ func (a *app) loginCandidate(draft config.Draft, useKeyring bool) (config.Settin
 	if candidate.APIVersion == 0 {
 		candidate.APIVersion = 2
 	}
-	if !draft.Exists && !a.terminal.IsTerminal() && strings.TrimSpace(a.authType) == "" && strings.TrimSpace(os.Getenv("JIRO_AUTH_TYPE")) == "" {
-		candidate.AuthType = ""
+	if strings.TrimSpace(candidate.UserAgent) == "" {
+		candidate.UserAgent = defaultUserAgent()
 	}
 
-	var secret string
-	var err error
 	if a.terminal.IsTerminal() {
-		candidate.Host, err = a.terminal.Prompt("Host", candidate.Host)
+		host, err := a.terminal.Prompt("Host", candidate.Host)
 		if err != nil {
 			return config.Settings{}, err
 		}
-		authDefault := string(candidate.AuthType)
-		if !draft.Exists {
-			authDefault = ""
-		}
-		auth, promptErr := a.terminal.Prompt("Auth type (basic/pat)", authDefault)
-		if promptErr != nil {
-			return config.Settings{}, promptErr
-		}
-		candidate.AuthType = config.AuthType(strings.ToLower(strings.TrimSpace(auth)))
-		if candidate.AuthType == config.AuthBasic {
-			candidate.Username, err = a.terminal.Prompt("Username", candidate.Username)
-			if err != nil {
-				return config.Settings{}, err
-			}
-		} else {
-			candidate.Username = ""
-		}
-		if err := normalizeLoginFields(&candidate); err != nil {
-			return config.Settings{}, err
-		}
-		secret, err = a.terminal.PromptSecret(secretLabel(candidate.AuthType))
-	} else {
-		if err := normalizeLoginFields(&candidate); err != nil {
-			return config.Settings{}, err
-		}
-		secret, err = a.nonTerminalSecret(candidate.AuthType)
+		candidate.Host = host
 	}
+
+	if passwordStdin || tokenStdin {
+		return a.stdinLoginCandidate(candidate, passwordStdin)
+	}
+
+	environmentCredential, environmentActive, err := config.LoadEnvironmentCredential()
+	if err != nil {
+		return config.Settings{}, err
+	}
+	if environmentActive {
+		environmentCredential.ApplyTo(&candidate)
+		if err := normalizeLoginFields(&candidate); err != nil {
+			return config.Settings{}, err
+		}
+		return candidate, nil
+	}
+
+	if !a.terminal.IsTerminal() {
+		return config.Settings{}, apperr.New(apperr.KindInvalidInput, "non-TTY login requires a complete JIRA_TOKEN or JIRA_USERNAME/JIRA_PASSWORD credential, or --password-stdin/--token-stdin")
+	}
+
+	if !draft.Exists {
+		candidate.AuthType = ""
+	}
+	authDefault := string(candidate.AuthType)
+	if !draft.Exists {
+		authDefault = ""
+	}
+	auth, err := a.terminal.Prompt("Auth type (basic/pat)", authDefault)
+	if err != nil {
+		return config.Settings{}, err
+	}
+	candidate.AuthType = config.AuthType(strings.ToLower(strings.TrimSpace(auth)))
+	if candidate.AuthType == config.AuthBasic {
+		candidate.Username, err = a.terminal.Prompt("Username", candidate.Username)
+		if err != nil {
+			return config.Settings{}, err
+		}
+	} else {
+		candidate.Username = ""
+	}
+	if err := normalizeLoginFields(&candidate); err != nil {
+		return config.Settings{}, err
+	}
+	secret, err := a.terminal.PromptSecret(secretLabel(candidate.AuthType))
 	if err != nil {
 		return config.Settings{}, err
 	}
 	if secret == "" {
 		return config.Settings{}, apperr.New(apperr.KindInvalidInput, strings.ToLower(secretLabel(candidate.AuthType))+" must not be empty")
 	}
+	setLoginSecret(&candidate, secret)
+	return candidate, nil
+}
+
+func (a *app) stdinLoginCandidate(candidate config.Settings, passwordStdin bool) (config.Settings, error) {
+	if os.Getenv("JIRA_TOKEN") != "" || os.Getenv("JIRA_PASSWORD") != "" {
+		return config.Settings{}, apperr.New(apperr.KindInvalidInput, "stdin credential mode conflicts with non-empty JIRA_TOKEN or JIRA_PASSWORD")
+	}
+	if passwordStdin {
+		candidate.AuthType = config.AuthBasic
+		candidate.Username = os.Getenv("JIRA_USERNAME")
+	} else {
+		candidate.AuthType = config.AuthPAT
+		candidate.Username = ""
+	}
+	if err := normalizeLoginFields(&candidate); err != nil {
+		return config.Settings{}, err
+	}
+	secret, err := readLoginCredential(a.stdin)
+	if err != nil {
+		return config.Settings{}, err
+	}
+	setLoginSecret(&candidate, secret)
+	return candidate, nil
+}
+
+func readLoginCredential(input io.Reader) (string, error) {
+	data, err := io.ReadAll(input)
+	if err != nil {
+		return "", apperr.Wrap(apperr.KindInvalidInput, err, "read credential from stdin")
+	}
+	if len(data) > 0 && data[len(data)-1] == '\n' {
+		data = data[:len(data)-1]
+		if len(data) > 0 && data[len(data)-1] == '\r' {
+			data = data[:len(data)-1]
+		}
+	}
+	if len(data) == 0 {
+		return "", apperr.New(apperr.KindInvalidInput, "credential read from stdin must not be empty")
+	}
+	return string(data), nil
+}
+
+func setLoginSecret(candidate *config.Settings, secret string) {
 	if candidate.AuthType == config.AuthPAT {
 		candidate.Token = secret
-	} else {
-		candidate.Password = secret
+		candidate.Password = ""
+		return
 	}
-	return candidate, nil
+	candidate.Password = secret
+	candidate.Token = ""
 }
 
 func normalizeLoginFields(candidate *config.Settings) error {
@@ -286,23 +362,8 @@ func normalizeLoginFields(candidate *config.Settings) error {
 	return nil
 }
 
-func (a *app) nonTerminalSecret(auth config.AuthType) (string, error) {
-	name := "JIRO_PASSWORD"
-	if auth == config.AuthPAT {
-		name = "JIRO_TOKEN"
-	}
-	if secret := os.Getenv(name); secret != "" {
-		return secret, nil
-	}
-	secret, err := io.ReadAll(a.stdin)
-	if err != nil {
-		return "", apperr.Wrap(apperr.KindInvalidInput, err, "read credential from stdin")
-	}
-	return strings.TrimRight(string(secret), "\r\n"), nil
-}
-
 func verifyLogin(ctx context.Context, candidate config.Settings) (jira.User, error) {
-	clientConfig := jira.Config{BaseURL: candidate.Host, Username: candidate.Username}
+	clientConfig := jira.Config{BaseURL: candidate.Host, Username: candidate.Username, UserAgent: candidate.UserAgent}
 	if candidate.AuthType == config.AuthPAT {
 		clientConfig.PAT = candidate.Token
 	} else {

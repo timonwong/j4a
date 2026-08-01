@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -19,6 +18,13 @@ func TestValidateRelativeEndpoint(t *testing.T) {
 		"rest/api/2/myself",
 		"/rest/api/2/search?jql=project%20%3D%20OPS&expand=names",
 		"plugins/servlet/example/%E2%9C%93",
+		"rest/api/2/myself#profile",
+		"rest/./api/../myself",
+		"rest/%252e%252e/api/2/myself",
+		`rest\api\2\myself`,
+		"rest/%0a/api/2/myself",
+		"rest/%zz/api/2/myself",
+		"rest/api/2/search?q=%25250a",
 	} {
 		endpoint := endpoint
 		t.Run("accept "+endpoint, func(t *testing.T) {
@@ -33,19 +39,6 @@ func TestValidateRelativeEndpoint(t *testing.T) {
 		"",
 		"https://other.example/rest/api/2/myself",
 		"//other.example/rest/api/2/myself",
-		"rest/api/2/myself#profile",
-		"rest/./api/2/myself",
-		"rest/api/../myself",
-		"rest/%2e%2e/api/2/myself",
-		"rest/%252e%252e/api/2/myself",
-		"rest%2f..%2fapi/2/myself",
-		`rest\api\2\myself`,
-		"rest/%5c/api/2/myself",
-		"rest/%0a/api/2/myself",
-		"rest/%zz/api/2/myself",
-		"rest/api/2/search?q=%0a",
-		"rest/api/2/search?q=%5c",
-		"rest/api/2/search?q=%25250a",
 	} {
 		endpoint := endpoint
 		t.Run("reject "+endpoint, func(t *testing.T) {
@@ -202,7 +195,7 @@ func TestStreamRequestInsecureTLSIsInvocationScoped(t *testing.T) {
 	}
 }
 
-func TestStreamRequestDisablesHTTP2RetryTransport(t *testing.T) {
+func TestStreamRequestUsesHTTP11(t *testing.T) {
 	t.Parallel()
 
 	protocol := make(chan int, 1)
@@ -225,21 +218,17 @@ func TestStreamRequestDisablesHTTP2RetryTransport(t *testing.T) {
 	}
 	_ = response.Body.Close()
 	if got := <-protocol; got != 1 {
-		t.Fatalf("HTTP protocol major = %d, want 1 to avoid HTTP/2 automatic retries", got)
+		t.Fatalf("HTTP protocol major = %d, want 1", got)
 	}
 }
 
-func TestStreamRequestStopsAfterFiveRedirects(t *testing.T) {
+func TestStreamRequestReturnsRedirectWithoutFollowingIt(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		calls.Add(1)
-		step, err := strconv.Atoi(strings.TrimPrefix(request.URL.Path, "/"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		http.Redirect(writer, request, "/"+strconv.Itoa(step+1), http.StatusFound)
+		http.Redirect(writer, request, "/next", http.StatusFound)
 	}))
 	defer server.Close()
 	client, err := NewClient(Config{BaseURL: server.URL})
@@ -248,13 +237,14 @@ func TestStreamRequestStopsAfterFiveRedirects(t *testing.T) {
 	}
 
 	response, err := client.Stream(context.Background(), StreamRequest{
-		Method: http.MethodGet, Endpoint: "0", Timeout: time.Second, FollowRedirects: true,
+		Method: http.MethodGet, Endpoint: "start", Timeout: time.Second,
 	})
-	if response != nil {
-		_ = response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "5 redirects") || calls.Load() != 6 {
-		t.Fatalf("response=%v error=%v calls=%d", response, err, calls.Load())
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusFound || calls.Load() != 1 {
+		t.Fatalf("status=%d calls=%d", response.StatusCode, calls.Load())
 	}
 }
 

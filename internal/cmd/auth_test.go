@@ -178,10 +178,9 @@ func TestLoginNonTTYEnvironmentAndStdin(t *testing.T) {
 		clearCommandEnv(t)
 		server := authenticatedServer(t, config.AuthBasic, "alice", "env-password", http.StatusOK)
 		defer server.Close()
-		t.Setenv("JIRO_HOST", server.URL)
-		t.Setenv("JIRO_AUTH_TYPE", "basic")
-		t.Setenv("JIRO_USERNAME", "alice")
-		t.Setenv("JIRO_PASSWORD", "env-password")
+		t.Setenv("JIRA_HOST", server.URL)
+		t.Setenv("JIRA_USERNAME", "alice")
+		t.Setenv("JIRA_PASSWORD", "env-password")
 		path := filepath.Join(t.TempDir(), "config.toml")
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 		code := Execute([]string{"--config", path, "-ojson", "auth", "login", "--use-keyring=false"}, strings.NewReader("stdin-password"), stdout, stderr)
@@ -204,15 +203,100 @@ func TestLoginNonTTYEnvironmentAndStdin(t *testing.T) {
 		clearCommandEnv(t)
 		server := authenticatedServer(t, config.AuthPAT, "", "stdin-token", http.StatusOK)
 		defer server.Close()
+		t.Setenv("JIRA_HOST", server.URL)
 		path := filepath.Join(t.TempDir(), "config.toml")
 		store := newMemorySecretStore()
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-		a := &app{stdin: strings.NewReader("stdin-token\n"), stdout: stdout, stderr: stderr, secretStore: store}
-		code := a.execute([]string{"--config", path, "--host", server.URL, "--auth-type", "pat", "auth", "login"})
+		a := &app{stdin: strings.NewReader("stdin-token\r\n"), stdout: stdout, stderr: stderr, secretStore: store}
+		code := a.execute([]string{"--config", path, "auth", "login", "--token-stdin"})
 		if code != 0 || stderr.Len() != 0 || !storeContains(store, "stdin-token") {
 			t.Fatalf("code=%d store=%+v stdout=%s stderr=%s", code, store, stdout.String(), stderr.String())
 		}
 	})
+
+	t.Run("password from stdin requires environment username", func(t *testing.T) {
+		clearCommandEnv(t)
+		server := authenticatedServer(t, config.AuthBasic, "alice", "stdin-password", http.StatusOK)
+		defer server.Close()
+		t.Setenv("JIRA_HOST", server.URL)
+		t.Setenv("JIRA_USERNAME", "alice")
+		store := newMemorySecretStore()
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		a := &app{stdin: strings.NewReader("stdin-password\n"), stdout: stdout, stderr: stderr, secretStore: store}
+		code := a.execute([]string{"--config", filepath.Join(t.TempDir(), "config.toml"), "auth", "login", "--password-stdin"})
+		if code != 0 || stderr.Len() != 0 || !storeContains(store, "stdin-password") {
+			t.Fatalf("code=%d store=%+v stdout=%s stderr=%s", code, store, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("stdin is not consumed without an explicit stdin flag", func(t *testing.T) {
+		clearCommandEnv(t)
+		path := writeAuthConfig(t, "[default]\nhost = \"https://jira.example\"\nauth_type = \"pat\"\n")
+		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+		code := Execute([]string{"--config", path, "auth", "login"}, strings.NewReader("implicit-token"), stdout, stderr)
+		if code != 2 || !strings.Contains(stderr.String(), "non-TTY login requires") {
+			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+	})
+
+	for _, test := range []struct {
+		name string
+		args []string
+		env  map[string]string
+		want string
+	}{
+		{name: "stdin modes are mutually exclusive", args: []string{"auth", "login", "--password-stdin", "--token-stdin"}, env: map[string]string{"JIRA_USERNAME": "alice"}, want: "mutually exclusive"},
+		{name: "stdin mode conflicts with environment token", args: []string{"auth", "login", "--password-stdin"}, env: map[string]string{"JIRA_USERNAME": "alice", "JIRA_TOKEN": "environment-token"}, want: "conflicts"},
+		{name: "stdin mode conflicts with environment password", args: []string{"auth", "login", "--token-stdin"}, env: map[string]string{"JIRA_PASSWORD": "environment-password"}, want: "conflicts"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clearCommandEnv(t)
+			for name, value := range test.env {
+				t.Setenv(name, value)
+			}
+			stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+			code := Execute(test.args, strings.NewReader("secret"), stdout, stderr)
+			if code != 2 || !strings.Contains(stderr.String(), test.want) {
+				t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestLoginTTYEnvironmentCredentialBypassesCredentialPromptsAndUsesUserAgent(t *testing.T) {
+	clearCommandEnv(t)
+	var gotUserAgent string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotUserAgent = request.Header.Get("User-Agent")
+		username, password, ok := request.BasicAuth()
+		if !ok || username != "alice" || password != "environment-password" {
+			t.Errorf("BasicAuth = %q/%q/%t", username, password, ok)
+		}
+		_, _ = io.WriteString(writer, `{"name":"alice","displayName":"Alice","active":true}`)
+	}))
+	defer server.Close()
+	t.Setenv("JIRA_HOST", server.URL)
+	t.Setenv("JIRA_USERNAME", "alice")
+	t.Setenv("JIRA_PASSWORD", "environment-password")
+	t.Setenv("JIRA_USER_AGENT", "runtime-agent")
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	terminal := &fakeLoginTerminal{prompts: []promptAnswer{{label: "Host", defaultValue: server.URL}}}
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	a := &app{stdin: strings.NewReader(""), stdout: stdout, stderr: stderr, terminal: terminal, secretStore: newMemorySecretStore()}
+	if code := a.execute([]string{"--config", path, "auth", "login", "--use-keyring=false"}); code != 0 {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if terminal.index != 1 || gotUserAgent != "runtime-agent" {
+		t.Fatalf("prompts=%d User-Agent=%q", terminal.index, gotUserAgent)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("runtime-agent")) {
+		t.Fatalf("runtime User-Agent was persisted: %s", data)
+	}
 }
 
 func TestLoginMissingInputAndUnauthorizedDoNotCommit(t *testing.T) {
@@ -225,31 +309,35 @@ func TestLoginMissingInputAndUnauthorizedDoNotCommit(t *testing.T) {
 	defer server.Close()
 
 	t.Run("missing username", func(t *testing.T) {
+		clearCommandEnv(t)
+		t.Setenv("JIRA_HOST", server.URL)
 		path := filepath.Join(t.TempDir(), "config.toml")
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-		code := Execute([]string{"--config", path, "--host", server.URL, "--auth-type", "basic", "auth", "login"}, strings.NewReader("secret"), stdout, stderr)
+		code := Execute([]string{"--config", path, "auth", "login", "--password-stdin"}, strings.NewReader("secret"), stdout, stderr)
 		if code != 2 || !strings.Contains(stderr.String(), "username is required") || calls != 0 {
 			t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls, stdout.String(), stderr.String())
 		}
 	})
 
 	t.Run("new profile missing explicit auth", func(t *testing.T) {
+		clearCommandEnv(t)
 		path := filepath.Join(t.TempDir(), "config.toml")
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-		code := Execute([]string{"--config", path, "--host", server.URL, "--username", "alice", "auth", "login"}, strings.NewReader("secret"), stdout, stderr)
-		if code != 2 || !strings.Contains(stderr.String(), "auth type must be basic or pat") || calls != 0 {
+		code := Execute([]string{"--config", path, "auth", "login"}, strings.NewReader("secret"), stdout, stderr)
+		if code != 2 || !strings.Contains(stderr.String(), "non-TTY login requires") || calls != 0 {
 			t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls, stdout.String(), stderr.String())
 		}
 	})
 
 	t.Run("unsupported API version", func(t *testing.T) {
+		clearCommandEnv(t)
 		path := writeAuthConfig(t, fmt.Sprintf("[default]\nhost = %q\nauth_type = \"pat\"\napi_version = 3\n", server.URL))
 		before, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-		code := Execute([]string{"--config", path, "auth", "login"}, strings.NewReader("secret"), stdout, stderr)
+		code := Execute([]string{"--config", path, "auth", "login", "--token-stdin"}, strings.NewReader("secret"), stdout, stderr)
 		if code != 2 || !strings.Contains(stderr.String(), "REST API version 2") || calls != 0 {
 			t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls, stdout.String(), stderr.String())
 		}
@@ -263,6 +351,7 @@ func TestLoginMissingInputAndUnauthorizedDoNotCommit(t *testing.T) {
 	})
 
 	t.Run("401", func(t *testing.T) {
+		clearCommandEnv(t)
 		path := writeAuthConfig(t, fmt.Sprintf("[default]\nhost = %q\nauth_type = \"pat\"\nuse_keyring = true\n", server.URL))
 		before, err := os.ReadFile(path)
 		if err != nil {
@@ -271,7 +360,7 @@ func TestLoginMissingInputAndUnauthorizedDoNotCommit(t *testing.T) {
 		store := newMemorySecretStore()
 		stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 		a := &app{stdin: strings.NewReader("bad-token"), stdout: stdout, stderr: stderr, secretStore: store}
-		code := a.execute([]string{"--config", path, "-ojson", "auth", "login"})
+		code := a.execute([]string{"--config", path, "-ojson", "auth", "login", "--token-stdin"})
 		if code != 3 || !strings.Contains(stderr.String(), `"kind":"auth"`) || store.setCalls != 0 {
 			t.Fatalf("code=%d store=%+v stdout=%s stderr=%s", code, store, stdout.String(), stderr.String())
 		}
@@ -291,14 +380,15 @@ func TestLoginLogoutAndLogoutIdempotence(t *testing.T) {
 	server := authenticatedServer(t, config.AuthPAT, "", "token", http.StatusOK)
 	defer server.Close()
 	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("JIRA_HOST", server.URL)
 	store := newMemorySecretStore()
 	stdout.Reset()
 	stderr.Reset()
 	a := &app{stdin: strings.NewReader("token"), stdout: stdout, stderr: stderr, secretStore: store}
-	if code := a.execute([]string{"--config", path, "--host", server.URL, "--auth-type", "pat", "auth", "login"}); code != 0 {
+	if code := a.execute([]string{"--config", path, "auth", "login", "--token-stdin"}); code != 0 {
 		t.Fatalf("login code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	t.Setenv("JIRO_TOKEN", "environment-token")
+	t.Setenv("JIRA_TOKEN", "environment-token")
 
 	for index, wantRemoved := range []bool{true, false} {
 		stdout.Reset()
@@ -418,6 +508,50 @@ func TestAuthStatusUsesInjectedKeyringStore(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"profile":"default"`) || strings.Contains(stdout.String(), "keyring-token") {
 		t.Fatalf("stdout=%s", stdout.String())
+	}
+}
+
+func TestAuthStatusUsesResolvedUserAgent(t *testing.T) {
+	clearCommandEnv(t)
+	userAgents := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		userAgents <- request.Header.Get("User-Agent")
+		_, _ = io.WriteString(writer, `{"name":"alice","displayName":"Alice","active":true}`)
+	}))
+	defer server.Close()
+	path := writeAuthConfig(t, fmt.Sprintf(`[default]
+host = %q
+username = "alice"
+auth_type = "basic"
+use_keyring = false
+password = "secret"
+user_agent = "default-agent"
+
+[profiles.bot]
+host = %q
+username = "alice"
+password = "secret"
+`, server.URL, server.URL))
+
+	for _, test := range []struct {
+		name, environment, want string
+	}{
+		{name: "named Profile inherits default", want: "default-agent"},
+		{name: "environment overrides Profile", environment: "environment-agent", want: "environment-agent"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clearCommandEnv(t)
+			if test.environment != "" {
+				t.Setenv("JIRA_USER_AGENT", test.environment)
+			}
+			stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+			if code := Execute([]string{"--config", path, "--profile", "bot", "auth", "status"}, strings.NewReader(""), stdout, stderr); code != 0 {
+				t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if got := <-userAgents; got != test.want {
+				t.Fatalf("User-Agent = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

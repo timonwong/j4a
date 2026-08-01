@@ -23,6 +23,7 @@ type tomlValues struct {
 	APIVersion *int    `toml:"api_version"`
 	ReadOnly   *bool   `toml:"read_only"`
 	UseKeyring *bool   `toml:"use_keyring"`
+	UserAgent  *string `toml:"user_agent"`
 	Password   *string `toml:"password"`
 	Token      *string `toml:"token"`
 }
@@ -47,7 +48,7 @@ func (v tomlValues) values() values {
 	return values{
 		host: v.Host, username: v.Username, authType: v.AuthType,
 		apiVersion: v.APIVersion, readOnly: v.ReadOnly, useKeyring: v.UseKeyring,
-		password: v.Password, token: v.Token,
+		password: v.Password, token: v.Token, userAgent: v.UserAgent,
 	}
 }
 
@@ -309,8 +310,8 @@ func encodeTOMLKey(value string) string {
 
 func sortedUpdateKeys(updates map[string]tomlUpdate) []string {
 	order := map[string]int{
-		"host": 0, "username": 1, "auth_type": 2,
-		"use_keyring": 3, "password": 4, "token": 5,
+		"host": 0, "username": 1, "auth_type": 2, "user_agent": 3,
+		"use_keyring": 4, "password": 5, "token": 6,
 	}
 	keys := make([]string, 0, len(updates))
 	for key := range updates {

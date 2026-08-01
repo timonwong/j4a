@@ -39,7 +39,7 @@ func executionSignalContext() (context.Context, func(), func() int) {
 
 func isAPIInvocation(args []string) bool {
 	valueFlags := map[string]struct{}{
-		"--config": {}, "-c": {}, "--profile": {}, "--host": {}, "--username": {}, "--auth-type": {}, "--output": {}, "-o": {},
+		"--config": {}, "-c": {}, "--profile": {}, "--output": {}, "-o": {},
 	}
 	for index := 0; index < len(args); index++ {
 		argument := args[index]
@@ -51,8 +51,7 @@ func isAPIInvocation(args []string) bool {
 			continue
 		}
 		if strings.HasPrefix(argument, "--config=") || strings.HasPrefix(argument, "--profile=") ||
-			strings.HasPrefix(argument, "--host=") || strings.HasPrefix(argument, "--username=") ||
-			strings.HasPrefix(argument, "--auth-type=") || strings.HasPrefix(argument, "--output=") ||
+			strings.HasPrefix(argument, "--output=") ||
 			(strings.HasPrefix(argument, "-c") && argument != "-c") || (strings.HasPrefix(argument, "-o") && argument != "-o") {
 			continue
 		}
@@ -66,7 +65,7 @@ func isAPIInvocation(args []string) bool {
 
 func hasExplicitOutputFlag(args []string) bool {
 	valueFlags := map[string]struct{}{
-		"--config": {}, "-c": {}, "--profile": {}, "--host": {}, "--username": {}, "--auth-type": {},
+		"--config": {}, "-c": {}, "--profile": {},
 		"--method": {}, "-X": {}, "--input": {}, "--string-field": {}, "-f": {}, "--field": {}, "-F": {},
 		"--form": {}, "--header": {}, "-H": {}, "--timeout": {},
 	}

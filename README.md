@@ -80,7 +80,7 @@ jiro auth logout
 jiro auth logout --profile bot
 ```
 
-`auth logout` cannot unset `JIRO_PASSWORD` or `JIRO_TOKEN` inherited from the
+`auth logout` cannot unset `JIRA_PASSWORD` or `JIRA_TOKEN` inherited from the
 shell and will report when one of those environment credentials remains active.
 
 Verify the effective Profile and Credential against Jira with
@@ -105,40 +105,57 @@ username = "timon"
 auth_type = "basic"
 api_version = 2
 use_keyring = true
+user_agent = "jiro-automation/1"
 
 [profiles.bot]
 host = "https://jira.example.com"
 auth_type = "pat"
 use_keyring = true
 read_only = true
+user_agent = "jiro-bot/1"
 ```
 
-Select a profile with `--profile bot` or `JIRO_PROFILE=bot`. Configuration
-precedence is CLI flags, environment variables, the selected profile, then the
-default profile.
+Select a Profile with `--profile bot` or `JIRO_PROFILE=bot`. `--config` and
+`--profile` are the only global config-selection flags; connection and
+authentication overrides use environment variables.
 
 Supported environment variables include:
 
-- `JIRO_HOST`, `JIRO_USERNAME`, `JIRO_PROFILE`
-- `JIRO_AUTH_TYPE` (`basic` or `pat`)
-- `JIRO_PASSWORD` for Basic Auth and `JIRO_TOKEN` for PAT
-- `JIRO_API_VERSION`, `JIRO_READ_ONLY`, `JIRO_USE_KEYRING`
-- `JIRO_CONFIG_FILE`
+- `JIRA_HOST`, `JIRA_API_VERSION`, `JIRA_USER_AGENT`
+- `JIRA_TOKEN` for PAT, or the atomic `JIRA_USERNAME` and `JIRA_PASSWORD` pair
+- `JIRO_PROFILE`, `JIRO_CONFIG_FILE`, `JIRO_CONFIG`
+- `JIRO_READ_ONLY`, `JIRO_USE_KEYRING`
 - `JIRO_FORCE_TTY` for forcing terminal-style tables through a pipe
 
-Secret precedence is environment, OS keyring, then TOML. When
-`use_keyring = true`, a missing keyring entry is an error and jiro does not
-silently fall back to a plaintext TOML secret.
+A non-empty `JIRA_TOKEN` selects PAT and ignores the Basic variables. Without a
+token, setting either `JIRA_USERNAME` or `JIRA_PASSWORD` requires both to be
+non-empty and selects Basic Auth. If no environment Credential is present, jiro
+uses the selected Profile's complete Credential; environment and persisted
+Credential halves are never combined. `JIRA_HOST` is independent and can
+override the Jira Instance while the selected Profile still supplies its
+Credential. The legacy `JIRO_HOST`, `JIRO_API_VERSION`, `JIRO_TOKEN`,
+`JIRO_USERNAME`, `JIRO_PASSWORD`, and `JIRO_AUTH_TYPE` variables are ignored.
 
-For non-interactive login, provide connection fields with flags or environment
-variables and provide the secret through `JIRO_PASSWORD` / `JIRO_TOKEN` or
-stdin. Secrets are never accepted as command-line arguments.
+`JIRA_USER_AGENT` overrides the selected Profile's `user_agent`, which inherits
+from `[default]` when omitted. The built-in fallback is `jiro/<version>` or
+`jiro/dev` for development builds. When `use_keyring = true`, a missing keyring
+entry is an error and jiro does not silently fall back to a plaintext TOML
+secret.
+
+For non-interactive login, provide a complete environment Credential, or use an
+explicit stdin mode. `--password-stdin` requires `JIRA_USERNAME`;
+`--token-stdin` selects PAT and ignores the username. The two modes are mutually
+exclusive and conflict with non-empty `JIRA_TOKEN` or `JIRA_PASSWORD`. Each mode
+reads to EOF, removes exactly one trailing LF and an immediately preceding CR,
+and rejects only an empty result. Secrets are never accepted as command-line
+arguments.
 
 ```sh
-printf '%s' "$JIRA_PAT" | jiro auth login \
-  --profile bot \
-  --host https://jira.example.com \
-  --auth-type pat
+printf '%s' "$JIRA_PAT" | JIRA_HOST=https://jira.example.com \
+  jiro --profile bot auth login --token-stdin
+
+printf '%s' "$JIRA_PASSWORD" | JIRA_HOST=https://jira.example.com \
+  JIRA_USERNAME=timon jiro auth login --password-stdin
 ```
 
 ## Commands
@@ -225,11 +242,12 @@ jiro api rest/api/2/issue/OPS-42/attachments \
 ```
 
 The endpoint may start with `/` but must remain relative to the Jira Instance.
-Absolute or scheme-relative URLs, fragments, traversal segments, backslashes,
-and control characters are rejected. Supplying fields or a body changes the
-implicit method from GET to POST; `--method` accepts only GET, HEAD, OPTIONS,
-POST, PUT, PATCH, and DELETE. A `read_only` Profile permits only GET, HEAD, and
-OPTIONS, without an override.
+Absolute and scheme-relative URLs are rejected. Other URL syntax, including dot
+segments, fragments, backslashes, controls, and encoding depth, is not
+prevalidated; URL construction and Go's HTTP stack report any resulting error.
+Supplying fields or a body changes the implicit method from GET to POST. An
+explicit method is trimmed, uppercased, and passed to Go without an allowlist.
+A `read_only` Profile permits only GET, HEAD, and OPTIONS, without an override.
 
 Request body modes are:
 
@@ -238,33 +256,41 @@ Request body modes are:
 - `-f, --string-field key=value` always creates a JSON string.
 - `-F, --field key=value` decodes a complete JSON value and otherwise uses a
   string; `@file` and `@-` read the value from a file or stdin. Fields form a
-  top-level JSON object, use command-line last-wins order for duplicate body
-  keys, and are limited to 16 MiB. GET, HEAD, and OPTIONS place fields in the
-  query string instead.
+  top-level JSON object and use command-line last-wins order for duplicate body
+  keys. GET, HEAD, and OPTIONS place fields in the query string instead;
+  `--input` and `--form` may still provide bodies for those explicit methods.
 - `--form key=value` creates multipart form data. `@file` and `@-` create file
   parts, while `@@text` sends the text `@text`. Form mode is mutually exclusive
   with the other body modes.
 
 Use repeatable `-H, --header 'Name: value'` for request headers. Authorization,
-Proxy-Authorization, Host, Content-Length, and User-Agent are managed by jiro
-and cannot be overridden. Defaults are `Accept: application/json`,
-`Accept-Encoding: identity`, and `Content-Type: application/json` when a
-non-form body exists; an empty header value removes an automatic default.
+Proxy-Authorization, Host, Content-Length, and User-Agent are always managed by
+jiro; Content-Type is additionally managed in form mode. Other names and values
+are passed to Go's HTTP stack without prevalidation. Repeated values for one
+name retain command-line order, an empty value deletes all earlier values, and
+later values may add the header again. Defaults are `Accept: application/json`
+and `Content-Type: application/json` when a non-form body exists.
+
+Go's standard compression behavior applies. When the Transport adds gzip, it
+transparently decompresses the response. Supplying `Accept-Encoding` explicitly
+leaves the response bytes to the caller without an additional decompression
+layer.
 
 Responses are raw Jira-owned bytes: any 2xx body is streamed unchanged to
 stdout, while a non-2xx body is streamed unchanged to stderr and returns the
-normal status-based exit code. `--include` prepends the final status and sorted
-headers with `Set-Cookie` values redacted. Global `--quiet` suppresses only a
+normal status-based exit code. `--include` prepends the protocol, status, and
+sorted response headers visible after Go's normal response processing;
+`Set-Cookie` values are not redacted. Global `--quiet` suppresses only a
 successful body; global `--output` is unsupported for `api`. There is no jq or
-template formatting, pagination, cache, retry, verbose trace, or output-file
-flag.
+template formatting, pagination, cache, application-level retry, verbose trace,
+or output-file flag.
 
-The default timeout is 30 seconds and `--timeout 0` disables it. Only bodyless
-GET and HEAD requests follow redirects, limited to five and to the same scheme,
-host, and port. `--insecure` disables TLS certificate and hostname verification
-for this invocation only. This is unsafe and should be reserved for explicitly
-trusted Jira Instances with a known certificate problem; it is a silent no-op
-for HTTP Instances.
+The default timeout is 30 seconds and `--timeout 0` disables it. Redirects are
+never followed; every 3xx response is returned as a raw non-2xx API error. API
+Requests use HTTP/1.1. `--insecure` disables TLS certificate and hostname
+verification for this invocation only. This is unsafe and should be reserved
+for explicitly trusted Jira Instances with a known certificate problem; it is
+a silent no-op for HTTP Instances.
 
 Transport access to arbitrary plugin or version paths does not add Jira Cloud
 REST API v3 support. Jira Data Center and Server REST API v2 remain jiro's
@@ -385,10 +411,13 @@ snapshot scoped to the normalized Jira base URL and the Principal returned by
 `/myself`; missing or ambiguous aliases remain errors. Values are decoded as
 JSON first and fall back to strings.
 
-The disposable JSON snapshots live under the platform user cache directory at
-`jiro/fields/hosts/<url-slug+hash>--<principal-slug+hash>.json`. For example,
-macOS uses `~/Library/Caches/jiro/fields/hosts/`. Refresh the current Principal's
-snapshot explicitly with:
+The disposable JSON snapshots live under `github.com/adrg/xdg`'s
+`xdg.CacheHome` at
+`jiro/fields/hosts/<url-slug+hash>--<principal-slug+hash>.json`. This honors the
+platform XDG cache location (including `XDG_CACHE_HOME` where applicable);
+macOS defaults to `~/Library/Caches/jiro/fields/hosts/`. There is no jiro-specific
+cache environment variable. Refresh the current Principal's snapshot explicitly
+with:
 
 ```sh
 jiro cache refresh

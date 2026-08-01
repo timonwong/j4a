@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/adrg/xdg"
 )
 
 func TestPathDeterministicAndIsolated(t *testing.T) {
@@ -53,6 +55,22 @@ func TestPathDeterministicAndIsolated(t *testing.T) {
 	}
 	if _, err := store.Path("https://jira.example.test", Principal{}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("empty principal error = %v", err)
+	}
+}
+
+func TestDefaultRootUsesXDGCacheHome(t *testing.T) {
+	original := xdg.CacheHome
+	xdg.CacheHome = t.TempDir()
+	t.Cleanup(func() { xdg.CacheHome = original })
+
+	store := New("", nil)
+	path, err := store.Path("https://jira.example.test", Principal{Username: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRoot := filepath.Join(xdg.CacheHome, "jiro") + string(filepath.Separator)
+	if !strings.HasPrefix(path, wantRoot) {
+		t.Fatalf("Path() = %q, want root %q", path, wantRoot)
 	}
 }
 
