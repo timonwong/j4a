@@ -25,5 +25,9 @@ Inspect the snapshot metadata and checksum file under `dist/`. A real release
 must contain exactly six binaries plus the checksum file, and `jiro --version`
 must report the tag version without the leading `v`.
 
+The read-only release smoke passes an empty release-notes file so GoReleaser
+does not call GitHub's write-gated generated-notes API. The final publish job
+generates the GitHub-native release notes with `contents: write`.
+
 Release assets are not created manually. If a release workflow fails, fix the
 cause and create a new SemVer tag rather than moving or reusing a published tag.
