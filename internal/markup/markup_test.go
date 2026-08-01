@@ -291,6 +291,20 @@ func TestToJiraPreservesTightNestedListOwnershipAndOrder(t *testing.T) {
 	}
 }
 
+func TestToJiraPreservesNestedListsWhenBlankLinesMakeTheParentListLoose(t *testing.T) {
+	t.Parallel()
+	input := "1. **明确基线与适用范围**\n   - 确认支持的平台和工具链版本。\n   - 明确工具链与应用合规声明的责任边界。\n\n2. **完善工具链与制品**\n   - 提供稳定、可追溯的 Go toolchain。\n   - 验证 Linux amd64、arm64。"
+	want := "# *明确基线与适用范围*\n#* 确认支持的平台和工具链版本。\n#* 明确工具链与应用合规声明的责任边界。\n# *完善工具链与制品*\n#* 提供稳定、可追溯的 Go toolchain。\n#* 验证 Linux amd64、arm64。"
+
+	got, err := ToJira(input, Markdown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("ToJira() = %q, want %q", got, want)
+	}
+}
+
 func TestToJiraPreservesNestedListOwnedByEmptyParentItem(t *testing.T) {
 	t.Parallel()
 	input := "-\n  - child\n- sibling"
