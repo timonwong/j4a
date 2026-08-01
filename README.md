@@ -64,6 +64,8 @@ jiro auth login
 jiro --profile bot auth login
 ```
 
+### Credential storage
+
 Credentials are stored in the OS keyring by default, with one independent
 keyring entry per Profile. To store the Credential in TOML, disable the keyring
 explicitly:
@@ -151,7 +153,7 @@ printf '%s' "$JIRA_PASSWORD" | JIRA_HOST=https://jira.example.com \
   JIRA_USERNAME=timon jiro auth login --password-stdin
 ```
 
-### Check or remove a credential
+### Check or remove a Credential
 
 `auth status` verifies the effective Profile and Credential with
 `/rest/api/2/myself`:
@@ -162,8 +164,8 @@ jiro --profile bot auth status
 ```
 
 It exits successfully only when Jira accepts the Credential. Its normalized
-output includes the Profile, Jira Instance, authentication type, and
-authenticated user without exposing the secret or its storage source.
+output includes the Profile, Jira Instance, authentication type, and Principal
+without exposing the secret or its storage source.
 
 `auth logout` removes a Profile's persisted Credential without deleting its
 non-secret configuration:
@@ -231,7 +233,7 @@ failure.
 Write-time Sprint specs accept a numeric ID, `active`, or a case-insensitive
 name substring. jiro uses the first match in Jira board and page order.
 
-### Links and metadata
+### Issue Links and metadata
 
 ```sh
 jiro issue link add OPS-42 --to OPS-99 --type Blocks
@@ -337,13 +339,13 @@ jiro issue add \
   --field customfield_10006='{"id":"123"}'
 ```
 
-A direct ID such as `customfield_10006` is used as-is and has priority. It
-does not call `/myself`, read the cache, or query Jira field metadata.
+A Custom Field ID such as `customfield_10006` is used as-is and has priority.
+It does not call `/myself`, read the cache, or query Jira field metadata.
 
-A human alias such as `story-points` is resolved through a 24-hour custom
-field metadata snapshot. The snapshot is scoped to the normalized Jira base
-URL and the Principal returned by `/myself`. Missing or ambiguous aliases are
-errors. Values are decoded as JSON first and fall back to strings.
+A Custom Field Alias such as `story-points` is resolved through a 24-hour Field
+Metadata Snapshot. The snapshot is scoped to the normalized Jira base URL and
+the Principal returned by `/myself`. Missing or ambiguous aliases are errors.
+Values are decoded as JSON first and fall back to strings.
 
 The disposable JSON snapshots live under `github.com/adrg/xdg`'s
 `xdg.CacheHome` at:
@@ -368,7 +370,7 @@ continues with the stale mapping, including for Issue mutations, and emits a
 warning. `jiro field list --custom` uses the same snapshot; the complete
 `field list` remains live.
 
-### Jira markup and Markdown Input
+### Jira Markup and Markdown Input
 
 Descriptions and comments use Jira Markup by default. Request Markdown
 conversion explicitly:
@@ -458,7 +460,7 @@ Global `--quiet` suppresses only a successful body, and global `--output` is
 unsupported for `api`.
 
 The API command does not provide `jq` or template formatting, pagination,
-application-level retry, verbose tracing, or an output-file flag.
+caching, application-level retry, verbose tracing, or an output-file flag.
 
 #### Transport
 
