@@ -55,7 +55,8 @@ jobs:
         with:
           distribution: goreleaser
           version: v2.17.1
-          args: release --skip=publish --clean
+          # Keep this job read-only; the publish job generates GitHub-native notes.
+          args: release --skip=publish --release-notes /dev/null --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
