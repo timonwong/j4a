@@ -17,8 +17,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"github.com/timonwong/jiro/internal/apperr"
@@ -26,16 +24,14 @@ import (
 	"github.com/timonwong/jiro/internal/jira"
 )
 
-const apiFieldJSONLimit = 16 << 20
 const rawHTTPOutputAnnotation = "jiro.io/raw-http-output"
 
-var apiMethods = []string{
+var apiMethodSuggestions = []string{
 	http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete,
 }
 
 var apiReadOnlyMethodNames = []string{http.MethodGet, http.MethodHead, http.MethodOptions}
 
-var apiAllowedMethods = apiMethodSet(apiMethods)
 var apiReadOnlyMethods = apiMethodSet(apiReadOnlyMethodNames)
 
 var apiProtectedHeaders = map[string]struct{}{
@@ -78,14 +74,13 @@ type apiOptions struct {
 }
 
 type apiPreparedRequest struct {
-	method          string
-	endpoint        string
-	header          http.Header
-	body            io.Reader
-	contentLength   int64
-	query           []jira.QueryParameter
-	followRedirects bool
-	closers         []io.Closer
+	method        string
+	endpoint      string
+	header        http.Header
+	body          io.Reader
+	contentLength int64
+	query         []jira.QueryParameter
+	closers       []io.Closer
 }
 
 func (r *apiPreparedRequest) close() {
@@ -103,7 +98,7 @@ func (a *app) apiCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "api ENDPOINT",
 		Short: "Send an authenticated raw HTTP request to Jira",
-		Long: "Send one authenticated HTTP request to a safe relative endpoint of the selected Jira Instance.\n" +
+		Long: "Send one authenticated HTTP request to a relative endpoint of the selected Jira Instance.\n" +
 			"Responses are streamed as Jira-owned raw bytes; global --output is not supported.\n" +
 			"Using --insecure disables TLS certificate and hostname verification and is unsafe.",
 		Example:     "  jiro api rest/api/2/myself\n  jiro api rest/api/2/issue -F fields='{\"summary\":\"Example\"}'\n  jiro api plugins/servlet/example --include",
@@ -134,7 +129,7 @@ func (a *app) apiCommand() *cobra.Command {
 				return err
 			}
 			clientConfig := jira.Config{
-				BaseURL: settings.Host, Username: settings.Username, UserAgent: "jiro/" + version,
+				BaseURL: settings.Host, Username: settings.Username, UserAgent: settings.UserAgent,
 			}
 			if settings.AuthType == config.AuthPAT {
 				clientConfig.PAT = settings.Token
@@ -149,7 +144,7 @@ func (a *app) apiCommand() *cobra.Command {
 			response, err := client.Stream(command.Context(), jira.StreamRequest{
 				Method: prepared.method, Endpoint: prepared.endpoint, Query: prepared.query, Header: prepared.header,
 				Body: prepared.body, ContentLength: prepared.contentLength, Timeout: options.timeout,
-				Insecure: options.insecure, FollowRedirects: prepared.followRedirects,
+				Insecure: options.insecure,
 			})
 			if err != nil {
 				return err
@@ -201,13 +196,7 @@ func (a *app) prepareAPIRequest(command *cobra.Command, endpoint string, options
 			method = http.MethodPost
 		}
 	}
-	if _, ok := apiAllowedMethods[method]; !ok {
-		return nil, apperr.New(apperr.KindInvalidInput, "method must be "+strings.Join(apiMethods, ", "))
-	}
 	bodylessMethod := method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions
-	if bodylessMethod && (inputSet || len(options.forms) > 0) {
-		return nil, apperr.New(apperr.KindInvalidInput, "HTTP method "+method+" cannot carry a request body")
-	}
 
 	queryFields := len(options.fields) > 0 && (inputSet || (explicitMethod && bodylessMethod))
 	parsedFields, err := a.parseAPIFields(command.Context(), options.fields)
@@ -260,7 +249,6 @@ func (a *app) prepareAPIRequest(command *cobra.Command, endpoint string, options
 	if formContentType != "" {
 		prepared.header.Set("Content-Type", formContentType)
 	}
-	prepared.followRedirects = !hasBody && (method == http.MethodGet || method == http.MethodHead)
 	return prepared, nil
 }
 
@@ -291,9 +279,6 @@ func (a *app) parseAPIFields(ctx context.Context, arguments []apiFieldArgument) 
 			return nil, apperr.New(apperr.KindInvalidInput, fmt.Sprintf("field %q must be key=value", argument.raw))
 		}
 		if argument.kind == apiStringField {
-			if !utf8.ValidString(raw) {
-				return nil, apperr.New(apperr.KindInvalidInput, fmt.Sprintf("field %q is not valid UTF-8", key))
-			}
 			fields = append(fields, parsedAPIField{key: key, value: raw, kind: argument.kind})
 			continue
 		}
@@ -308,9 +293,6 @@ func (a *app) parseAPIFields(ctx context.Context, arguments []apiFieldArgument) 
 		}
 		value, decoded := decodeAPIFieldValue(data)
 		if !decoded {
-			if !utf8.Valid(data) {
-				return nil, apperr.New(apperr.KindInvalidInput, fmt.Sprintf("field %q string value is not valid UTF-8", key))
-			}
 			value = string(data)
 		}
 		fields = append(fields, parsedAPIField{key: key, value: value, kind: argument.kind})
@@ -335,12 +317,9 @@ func (a *app) readAPIFieldSource(ctx context.Context, path string) ([]byte, erro
 	if ownedCloser != nil {
 		defer ownedCloser.Close()
 	}
-	data, err := readAPIInputWithContext(ctx, io.LimitReader(reader, apiFieldJSONLimit+1), cancelCloser)
+	data, err := readAPIInputWithContext(ctx, reader, cancelCloser)
 	if err != nil {
 		return nil, apperr.Wrap(apperr.KindInvalidInput, err, "read API field input")
-	}
-	if len(data) > apiFieldJSONLimit {
-		return nil, apperr.New(apperr.KindInvalidInput, "field-built JSON exceeds 16 MiB; use --input for larger bodies")
 	}
 	return data, nil
 }
@@ -389,9 +368,6 @@ func encodeAPIFieldObject(fields []parsedAPIField) ([]byte, error) {
 	encoded, err := json.Marshal(object)
 	if err != nil {
 		return nil, apperr.Wrap(apperr.KindInvalidInput, err, "encode API fields")
-	}
-	if len(encoded) > apiFieldJSONLimit {
-		return nil, apperr.New(apperr.KindInvalidInput, "field-built JSON exceeds 16 MiB; use --input for larger bodies")
 	}
 	return encoded, nil
 }
@@ -529,7 +505,7 @@ func (a *app) prepareAPIMultipart(ctx context.Context, values []string) (io.Read
 	for _, value := range values {
 		name, raw, found := strings.Cut(value, "=")
 		name = strings.TrimSpace(name)
-		if !found || !validAPIMultipartParameter(name) {
+		if !found || name == "" {
 			closeAll()
 			return nil, 0, "", nil, apperr.New(apperr.KindInvalidInput, fmt.Sprintf("form field %q must be key=value", value))
 		}
@@ -578,11 +554,6 @@ func (a *app) prepareAPIMultipart(ctx context.Context, values []string) (io.Read
 			size = info.Size()
 		}
 		filename := filepath.Base(path)
-		if !validAPIMultipartParameter(filename) {
-			_ = file.Close()
-			closeAll()
-			return nil, 0, "", nil, apperr.New(apperr.KindInvalidInput, fmt.Sprintf("API form filename %q contains invalid characters", filename))
-		}
 		parts = append(parts, apiFormPart{
 			name: name, reader: file, size: size, filename: filename, contentType: mediaType,
 		})
@@ -601,18 +572,6 @@ func (a *app) prepareAPIMultipart(ctx context.Context, values []string) (io.Read
 	body := newAPIMultipartReader(boundary, parts)
 	closers = append(closers, body)
 	return body, length, contentType, closers, nil
-}
-
-func validAPIMultipartParameter(value string) bool {
-	if value == "" || !utf8.ValidString(value) {
-		return false
-	}
-	for _, char := range value {
-		if unicode.IsControl(char) {
-			return false
-		}
-	}
-	return true
 }
 
 func apiMultipartLength(boundary string, parts []apiFormPart) (int64, error) {
@@ -729,14 +688,13 @@ func usesAPIStdin(options apiOptions) int {
 func parseAPIHeaders(values []string, hasBody, form bool) (http.Header, error) {
 	headers := make(http.Header)
 	headers.Set("Accept", "application/json")
-	headers.Set("Accept-Encoding", "identity")
 	if hasBody && !form {
 		headers.Set("Content-Type", "application/json")
 	}
 	for _, value := range values {
 		name, headerValue, found := strings.Cut(value, ":")
 		name = strings.TrimSpace(name)
-		if !found || !validAPIHeaderName(name) {
+		if !found {
 			return nil, apperr.New(apperr.KindInvalidInput, fmt.Sprintf("header %q must be 'Name: value'", value))
 		}
 		lower := strings.ToLower(name)
@@ -747,39 +705,14 @@ func parseAPIHeaders(values []string, hasBody, form bool) (http.Header, error) {
 			return nil, apperr.New(apperr.KindInvalidInput, "Content-Type cannot be customized in form mode")
 		}
 		headerValue = strings.TrimSpace(headerValue)
-		if containsAPIControlCharacter(headerValue) {
-			return nil, apperr.New(apperr.KindInvalidInput, fmt.Sprintf("header %q contains a control character", name))
-		}
 		canonical := textproto.CanonicalMIMEHeaderKey(name)
 		if headerValue == "" {
 			headers.Del(canonical)
 		} else {
-			headers.Set(canonical, headerValue)
+			headers.Add(canonical, headerValue)
 		}
 	}
 	return headers, nil
-}
-
-func containsAPIControlCharacter(value string) bool {
-	for _, char := range value {
-		if unicode.IsControl(char) {
-			return true
-		}
-	}
-	return false
-}
-
-func validAPIHeaderName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for _, char := range name {
-		if !(char >= 'a' && char <= 'z') && !(char >= 'A' && char <= 'Z') &&
-			!(char >= '0' && char <= '9') && !strings.ContainsRune("!#$%&'*+-.^_`|~", char) {
-			return false
-		}
-	}
-	return true
 }
 
 func (a *app) renderAPIResponse(response *http.Response, include bool) error {
@@ -842,11 +775,7 @@ func writeAPIResponseHeaders(writer io.Writer, response *http.Response) error {
 	sort.Strings(names)
 	for _, name := range names {
 		values := response.Header.Values(name)
-		for _, original := range values {
-			value := original
-			if strings.EqualFold(name, "Set-Cookie") {
-				value = "<redacted>"
-			}
+		for _, value := range values {
 			if _, err := fmt.Fprintf(writer, "%s: %s\r\n", name, value); err != nil {
 				return err
 			}

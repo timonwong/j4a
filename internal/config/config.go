@@ -28,20 +28,13 @@ const (
 	AuthPAT   AuthType = "pat"
 )
 
-// Options are explicit command-line settings. A non-zero field overrides the
-// environment, selected profile, and [default] config values, in that order.
-// Bool options use pointers so an explicit false can override a config true.
+// Options select the config source and Profile. Bool options use pointers so
+// callers can explicitly override persisted jiro behavior where needed.
 type Options struct {
 	ConfigPath string
 	Profile    string
-	Host       string
-	Username   string
-	AuthType   string
-	APIVersion int
 	ReadOnly   *bool
 	UseKeyring *bool
-	Password   string
-	Token      string
 }
 
 // Settings is the fully resolved connection configuration.
@@ -53,6 +46,7 @@ type Settings struct {
 	APIVersion int      `json:"apiVersion"`
 	ReadOnly   bool     `json:"readOnly"`
 	UseKeyring bool     `json:"useKeyring"`
+	UserAgent  string   `json:"userAgent,omitempty"`
 	Password   string   `json:"-"`
 	Token      string   `json:"-"`
 }
@@ -92,6 +86,7 @@ type MaskedSettings struct {
 	APIVersion int      `json:"apiVersion"`
 	ReadOnly   bool     `json:"readOnly"`
 	UseKeyring bool     `json:"useKeyring"`
+	UserAgent  string   `json:"userAgent,omitempty"`
 	Password   string   `json:"password,omitempty"`
 	Token      string   `json:"token,omitempty"`
 }
@@ -100,7 +95,7 @@ type MaskedSettings struct {
 func (s Settings) Masked() MaskedSettings {
 	return MaskedSettings{
 		Profile: s.Profile, Host: s.Host, Username: s.Username, AuthType: s.AuthType,
-		APIVersion: s.APIVersion, ReadOnly: s.ReadOnly, UseKeyring: s.UseKeyring,
+		APIVersion: s.APIVersion, ReadOnly: s.ReadOnly, UseKeyring: s.UseKeyring, UserAgent: s.UserAgent,
 		Password: mask(s.Password), Token: mask(s.Token),
 	}
 }
@@ -142,7 +137,8 @@ func DefaultPath() (string, error) {
 }
 
 // Load reads TOML configuration and resolves settings with this precedence:
-// options, JIRO_* environment variables, selected profile, then [default].
+// JIRA_* connection overrides, selected Profile, then [default]. jiro-owned
+// behavior continues to use JIRO_* environment variables.
 // A nil store uses the operating system keyring when use_keyring is enabled.
 func Load(options Options, store SecretStore) (Settings, error) {
 	return load(options, store, true)
@@ -204,11 +200,20 @@ func load(options Options, store SecretStore, resolveSecrets bool) (Settings, er
 	if err != nil {
 		return Settings{}, err
 	}
+	environmentCredential, active, err := LoadEnvironmentCredential()
+	if err != nil {
+		return Settings{}, err
+	}
+	if active {
+		environmentCredential.ApplyTo(&settings)
+	}
 	if !resolveSecrets {
 		return settings, nil
 	}
-	if err := resolveSecret(&settings, store, firstNonEmpty(optionSecret(options, settings.AuthType), explicitEnvSecret(settings.AuthType))); err != nil {
-		return Settings{}, err
+	if !active {
+		if err := resolveSecret(&settings, store); err != nil {
+			return Settings{}, err
+		}
 	}
 	if err := validateCredential(settings); err != nil {
 		return Settings{}, err
@@ -285,6 +290,9 @@ func resolve(profile string, values values) (Settings, error) {
 	if values.useKeyring != nil {
 		setting.UseKeyring = *values.useKeyring
 	}
+	if values.userAgent != nil {
+		setting.UserAgent = *values.userAgent
+	}
 	if values.password != nil {
 		setting.Password = *values.password
 	}
@@ -294,15 +302,7 @@ func resolve(profile string, values values) (Settings, error) {
 	return setting, nil
 }
 
-func resolveSecret(settings *Settings, store SecretStore, envSecret string) error {
-	if envSecret != "" {
-		if settings.AuthType == AuthPAT {
-			settings.Token = envSecret
-		} else {
-			settings.Password = envSecret
-		}
-		return nil
-	}
+func resolveSecret(settings *Settings, store SecretStore) error {
 	if !settings.UseKeyring {
 		return nil
 	}
@@ -338,20 +338,6 @@ func validateCredential(settings Settings) error {
 		return apperr.New(apperr.KindConfig, "password is required for basic authentication")
 	}
 	return nil
-}
-
-func explicitEnvSecret(auth AuthType) string {
-	if auth == AuthPAT {
-		return os.Getenv("JIRO_TOKEN")
-	}
-	return os.Getenv("JIRO_PASSWORD")
-}
-
-func optionSecret(options Options, auth AuthType) string {
-	if auth == AuthPAT {
-		return options.Token
-	}
-	return options.Password
 }
 
 // NormalizeHost turns a Jira base URL into a canonical, stable form.
@@ -394,7 +380,7 @@ func SetSecret(store SecretStore, settings Settings, secret string) error {
 	if store == nil {
 		store = OSSecretStore{}
 	}
-	if strings.TrimSpace(secret) == "" {
+	if secret == "" {
 		return apperr.New(apperr.KindInvalidInput, "secret must not be empty")
 	}
 	if err := store.Set(KeyringService, KeyringAccount(settings.Profile), secret); err != nil {
@@ -415,9 +401,9 @@ func DeleteSecret(store SecretStore, settings Settings) error {
 }
 
 type values struct {
-	host, username, authType, password, token *string
-	apiVersion                                *int
-	readOnly, useKeyring                      *bool
+	host, username, authType, password, token, userAgent *string
+	apiVersion                                           *int
+	readOnly, useKeyring                                 *bool
 }
 
 type fileConfig struct {
@@ -459,6 +445,9 @@ func merge(base, override values) values {
 	if override.token != nil {
 		result.token = override.token
 	}
+	if override.userAgent != nil {
+		result.userAgent = override.userAgent
+	}
 	if override.apiVersion != nil {
 		result.apiVersion = override.apiVersion
 	}
@@ -481,13 +470,10 @@ func mergeProfile(base, override values) values {
 
 func environmentValues() (values, error) {
 	var result values
-	result.host = envString("JIRO_HOST")
-	result.username = envString("JIRO_USERNAME")
-	result.authType = envString("JIRO_AUTH_TYPE")
-	result.password = envString("JIRO_PASSWORD")
-	result.token = envString("JIRO_TOKEN")
+	result.host = envString("JIRA_HOST")
+	result.userAgent = envString("JIRA_USER_AGENT")
 	var err error
-	if result.apiVersion, err = envInt("JIRO_API_VERSION"); err != nil {
+	if result.apiVersion, err = envInt("JIRA_API_VERSION"); err != nil {
 		return values{}, err
 	}
 	if result.readOnly, err = envBool("JIRO_READ_ONLY"); err != nil {
@@ -501,25 +487,42 @@ func environmentValues() (values, error) {
 
 func optionValues(options Options) values {
 	result := values{readOnly: options.ReadOnly, useKeyring: options.UseKeyring}
-	if options.Host != "" {
-		result.host = &options.Host
-	}
-	if options.Username != "" {
-		result.username = &options.Username
-	}
-	if options.AuthType != "" {
-		result.authType = &options.AuthType
-	}
-	if options.Password != "" {
-		result.password = &options.Password
-	}
-	if options.Token != "" {
-		result.token = &options.Token
-	}
-	if options.APIVersion != 0 {
-		result.apiVersion = &options.APIVersion
-	}
 	return result
+}
+
+// EnvironmentCredential is one complete runtime credential resolved from the
+// JIRA_* environment contract.
+type EnvironmentCredential struct {
+	AuthType AuthType
+	Username string
+	Password string
+	Token    string
+}
+
+// LoadEnvironmentCredential resolves the atomic JIRA_* credential override.
+// A non-empty token selects PAT and ignores Basic variables. Otherwise setting
+// either Basic variable requires both values to be non-empty.
+func LoadEnvironmentCredential() (EnvironmentCredential, bool, error) {
+	if token := os.Getenv("JIRA_TOKEN"); token != "" {
+		return EnvironmentCredential{AuthType: AuthPAT, Token: token}, true, nil
+	}
+	username, usernameSet := os.LookupEnv("JIRA_USERNAME")
+	password, passwordSet := os.LookupEnv("JIRA_PASSWORD")
+	if !usernameSet && !passwordSet {
+		return EnvironmentCredential{}, false, nil
+	}
+	if username == "" || password == "" {
+		return EnvironmentCredential{}, false, apperr.New(apperr.KindConfig, "JIRA_USERNAME and JIRA_PASSWORD must both be non-empty for Basic authentication")
+	}
+	return EnvironmentCredential{AuthType: AuthBasic, Username: username, Password: password}, true, nil
+}
+
+// ApplyTo replaces the complete Credential portion of settings atomically.
+func (credential EnvironmentCredential) ApplyTo(settings *Settings) {
+	settings.AuthType = credential.AuthType
+	settings.Username = credential.Username
+	settings.Password = credential.Password
+	settings.Token = credential.Token
 }
 
 func envString(name string) *string {

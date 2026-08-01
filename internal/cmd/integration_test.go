@@ -307,7 +307,10 @@ func TestSchema(t *testing.T) {
 		SchemaVersion string `json:"schemaVersion"`
 		Data          struct {
 			ContractVersion string `json:"contractVersion"`
-			Output          struct {
+			GlobalFlags     []struct {
+				Name string `json:"name"`
+			} `json:"globalFlags"`
+			Output struct {
 				SchemaVersion  string `json:"schemaVersion"`
 				PartialFailure string `json:"partialFailure"`
 			} `json:"output"`
@@ -341,6 +344,13 @@ func TestSchema(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), `"name":"raw"`) {
 		t.Fatalf("removed --raw flag remains in schema: %s", stdout.String())
+	}
+	globalFlags := make([]string, 0, len(envelope.Data.GlobalFlags))
+	for _, flag := range envelope.Data.GlobalFlags {
+		globalFlags = append(globalFlags, flag.Name)
+	}
+	if strings.Join(globalFlags, ",") != "config,profile,output,quiet" {
+		t.Fatalf("global flags = %v", globalFlags)
 	}
 	if envelope.Data.Output.SchemaVersion != "1" ||
 		!strings.Contains(envelope.Data.Output.PartialFailure, "stdout") ||
@@ -433,6 +443,14 @@ func TestSchema(t *testing.T) {
 	for _, name := range []string{"method", "input", "string-field", "field", "form", "header", "timeout", "insecure", "include"} {
 		if _, ok := flags["api"][name]; !ok {
 			t.Fatalf("api is missing --%s", name)
+		}
+	}
+	if flags["api"]["method"].kind != "string" {
+		t.Fatalf("api --method type = %q, want string", flags["api"]["method"].kind)
+	}
+	for _, name := range []string{"use-keyring", "password-stdin", "token-stdin"} {
+		if _, ok := flags["auth login"][name]; !ok {
+			t.Fatalf("auth login is missing --%s", name)
 		}
 	}
 	for _, name := range []string{"auth login", "auth logout"} {
@@ -601,8 +619,9 @@ func writeCLIConfig(t *testing.T, host string, readOnly bool) string {
 func clearCommandEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
-		"JIRO_CONFIG_FILE", "JIRO_CONFIG", "JIRO_PROFILE", "JIRO_HOST", "JIRO_USERNAME", "JIRO_AUTH_TYPE",
-		"JIRO_API_VERSION", "JIRO_READ_ONLY", "JIRO_USE_KEYRING", "JIRO_PASSWORD", "JIRO_TOKEN", "JIRO_FORCE_TTY",
+		"JIRO_CONFIG_FILE", "JIRO_CONFIG", "JIRO_PROFILE", "JIRO_READ_ONLY", "JIRO_USE_KEYRING", "JIRO_FORCE_TTY",
+		"JIRA_HOST", "JIRA_API_VERSION", "JIRA_TOKEN", "JIRA_USERNAME", "JIRA_PASSWORD", "JIRA_USER_AGENT",
+		"JIRO_HOST", "JIRO_API_VERSION", "JIRO_TOKEN", "JIRO_USERNAME", "JIRO_PASSWORD", "JIRO_AUTH_TYPE",
 	} {
 		t.Setenv(name, "")
 		if err := os.Unsetenv(name); err != nil {

@@ -16,6 +16,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/adrg/xdg"
 )
 
 const (
@@ -57,8 +59,8 @@ type Snapshot struct {
 	Fields        []Field   `json:"fields"`
 }
 
-// Store owns field-cache storage. Leave Root empty to use
-// os.UserCacheDir()/jiro. Leave Now nil to use time.Now. Root and Now are
+// Store owns field-cache storage. Leave Root empty to use xdg.CacheHome/jiro.
+// Leave Now nil to use time.Now. Root and Now are
 // exported for test injection and for callers that need an isolated cache.
 type Store struct {
 	Root string
@@ -66,7 +68,7 @@ type Store struct {
 }
 
 // New returns a Store with the supplied optional root and clock. Empty root
-// uses os.UserCacheDir()/jiro and nil now uses time.Now.
+// uses xdg.CacheHome/jiro and nil now uses time.Now.
 func New(root string, now func() time.Time) Store {
 	return Store{Root: root, Now: now}
 }
@@ -224,11 +226,7 @@ func (s Store) root() (string, error) {
 	if s.Root != "" {
 		return s.Root, nil
 	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve user cache directory: %w", err)
-	}
-	return filepath.Join(cacheDir, "jiro"), nil
+	return filepath.Join(xdg.CacheHome, "jiro"), nil
 }
 
 func (s Store) now() time.Time {

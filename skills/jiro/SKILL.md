@@ -34,10 +34,10 @@ jiro auth login
 jiro --profile bot auth login
 ```
 
-For non-interactive login, provide connection fields with flags or environment variables and provide the credential through `JIRO_PASSWORD`, `JIRO_TOKEN`, or stdin. Keep credentials out of command-line arguments:
+For non-interactive login, use the atomic `JIRA_*` Credential contract or an explicit stdin mode. A non-empty `JIRA_TOKEN` selects PAT; otherwise `JIRA_USERNAME` and `JIRA_PASSWORD` must both be non-empty. `--password-stdin` requires `JIRA_USERNAME`, while `--token-stdin` selects PAT. Keep credentials out of command-line arguments:
 
 ```bash
-printf '%s' "$JIRA_PAT" | jiro --profile bot --host https://jira.example.com --auth-type pat auth login --output=json
+printf '%s' "$JIRA_PAT" | JIRA_HOST=https://jira.example.com jiro --profile bot auth login --token-stdin --output=json
 ```
 
 The OS keyring is the default credential store and each Profile owns an independent credential. Use `auth login --use-keyring=false` only when plaintext TOML storage is explicitly intended; jiro enforces mode `0600` on Unix-like systems. Remove only the selected Profile's persisted credential with `jiro --profile bot auth logout --output=json`, then inspect `environmentCredentialActive` because logout cannot remove credentials inherited from the shell.
@@ -165,7 +165,7 @@ The stable exit codes are:
 - `6`: rate limited
 - `7`: partial failure
 
-Warnings describe a degraded success and do not change exit code `0`. On exit code `7`, jiro writes the complete normalized result to stdout before the structured error to stderr. Preserve and report both, including every succeeded, failed, and unattempted item. jiro exposes no raw-output mode; normalized JSON is the automation contract.
+Warnings describe a degraded success and do not change exit code `0`. On exit code `7`, jiro writes the complete normalized result to stdout before the structured error to stderr. Preserve and report both, including every succeeded, failed, and unattempted item. Typed commands expose no general raw-output mode; normalized JSON is their automation contract. `jiro api` is the sole raw HTTP exception.
 
 Pause after permission errors, missing or ambiguous metadata, rate limiting, or uncertain output. Determine whether Jira applied the write before retrying.
 
@@ -182,13 +182,13 @@ An expired snapshot may be used with a `stale_field_cache` warning when refresh 
 
 ## Use a bounded REST fallback
 
-Use REST only after `jiro schema --output=json` and the relevant help prove that jiro lacks the requested operation. State that the fallback returns Jira's raw, version-dependent response rather than jiro's normalized contract.
+Use `jiro api` only after `jiro schema --output=json` and the relevant typed-command help prove that jiro lacks the requested operation. State that the fallback returns Jira's raw, version-dependent response rather than jiro's normalized contract.
 
 Before sending a REST request:
 
 1. Identify the installed Jira product and version, then consult the matching authoritative [Jira Data Center REST API documentation](https://developer.atlassian.com/server/jira/platform/about-the-jira-server-rest-apis/). Use the Jira Software API documentation for software-specific resources.
-2. Require `JIRO_HOST` and `JIRO_AUTH_TYPE`. For `pat`, require `JIRO_TOKEN`; for `basic`, require both `JIRO_USERNAME` and `JIRO_PASSWORD`.
-3. Use an HTTP client invocation that reads those environment variables at execution time. Keep literal variable references in command text, keep xtrace and verbose header logging disabled, and keep Authorization values out of command arguments and output.
+2. Reuse the selected Profile, or use the atomic environment contract: non-empty `JIRA_TOKEN`, otherwise both `JIRA_USERNAME` and `JIRA_PASSWORD`. `JIRA_HOST` may independently override the Jira Instance.
+3. Use `jiro api` so credentials are read at execution time and Authorization remains managed. Keep xtrace and verbose header logging disabled, and keep Authorization values out of command arguments and output.
 4. Use the configured HTTPS Jira base URL, including any context path, with normal certificate verification. Send PATs as Bearer credentials and Basic credentials according to Atlassian's [PAT](https://developer.atlassian.com/server/jira/platform/personal-access-token/) and [Basic Auth](https://developer.atlassian.com/server/jira/platform/basic-authentication/) guidance.
 5. Query endpoint and field metadata before a write, send the smallest payload that satisfies the request, and read the changed resource back through REST afterward.
 

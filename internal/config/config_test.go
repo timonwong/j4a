@@ -52,7 +52,6 @@ password = "profile-password"
 api_version = 3
 read_only = false
 `)
-	falseValue := false
 	tests := []struct {
 		name                             string
 		env                              map[string]string
@@ -62,8 +61,7 @@ read_only = false
 		wantReadOnly                     bool
 	}{
 		{"profile overrides default", nil, Options{ConfigPath: path, Profile: "work"}, "https://profile.example/jira", "profile-user", "profile-password", 3, false},
-		{"environment overrides profile", map[string]string{"JIRO_PROFILE": "work", "JIRO_HOST": "https://env.example", "JIRO_USERNAME": "env-user", "JIRO_PASSWORD": "env-password", "JIRO_API_VERSION": "4", "JIRO_READ_ONLY": "true"}, Options{ConfigPath: path}, "https://env.example", "env-user", "env-password", 4, true},
-		{"options override environment", map[string]string{"JIRO_PROFILE": "work", "JIRO_HOST": "https://env.example", "JIRO_USERNAME": "env-user", "JIRO_PASSWORD": "env-password", "JIRO_API_VERSION": "4", "JIRO_READ_ONLY": "true"}, Options{ConfigPath: path, Host: "https://cli.example/", Username: "cli-user", Password: "cli-password", APIVersion: 5, ReadOnly: &falseValue}, "https://cli.example", "cli-user", "cli-password", 5, false},
+		{"environment overrides profile", map[string]string{"JIRO_PROFILE": "work", "JIRA_HOST": "https://env.example", "JIRA_USERNAME": "env-user", "JIRA_PASSWORD": "env-password", "JIRA_API_VERSION": "4", "JIRO_READ_ONLY": "true"}, Options{ConfigPath: path}, "https://env.example", "env-user", "env-password", 4, true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -77,6 +75,143 @@ read_only = false
 			}
 			if got.Host != test.wantHost || got.Username != test.wantUser || got.Password != test.wantPassword || got.APIVersion != test.wantVersion || got.ReadOnly != test.wantReadOnly {
 				t.Fatalf("Load() = %+v, want host=%q user=%q password=%q version=%d readOnly=%t", got, test.wantHost, test.wantUser, test.wantPassword, test.wantVersion, test.wantReadOnly)
+			}
+		})
+	}
+}
+
+func TestLoadJiraEnvironmentCredentialContract(t *testing.T) {
+	clearJiroEnv(t)
+	path := writeConfig(t, `
+[default]
+host = "https://profile.example/jira"
+username = "profile-user"
+auth_type = "basic"
+use_keyring = false
+password = "profile-password"
+`)
+
+	t.Run("non-empty token selects PAT and ignores Basic variables", func(t *testing.T) {
+		clearJiroEnv(t)
+		t.Setenv("JIRA_TOKEN", "environment-token")
+		t.Setenv("JIRA_USERNAME", "ignored-user")
+		t.Setenv("JIRA_PASSWORD", "")
+
+		got, err := Load(Options{ConfigPath: path}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.AuthType != AuthPAT || got.Token != "environment-token" || got.Username != "" || got.Password != "" {
+			t.Fatalf("Load() = %+v, want atomic PAT credential", got)
+		}
+	})
+
+	t.Run("complete Basic environment credential replaces the Profile credential", func(t *testing.T) {
+		clearJiroEnv(t)
+		t.Setenv("JIRA_USERNAME", "environment-user")
+		t.Setenv("JIRA_PASSWORD", "environment-password")
+
+		got, err := Load(Options{ConfigPath: path}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.AuthType != AuthBasic || got.Username != "environment-user" || got.Password != "environment-password" || got.Token != "" {
+			t.Fatalf("Load() = %+v, want atomic Basic credential", got)
+		}
+	})
+
+	for _, test := range []struct {
+		name string
+		env  map[string]string
+	}{
+		{name: "username without password", env: map[string]string{"JIRA_USERNAME": "environment-user"}},
+		{name: "password without username", env: map[string]string{"JIRA_PASSWORD": "environment-password"}},
+		{name: "explicitly empty password", env: map[string]string{"JIRA_USERNAME": "environment-user", "JIRA_PASSWORD": ""}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clearJiroEnv(t)
+			for name, value := range test.env {
+				t.Setenv(name, value)
+			}
+			_, err := Load(Options{ConfigPath: path}, nil)
+			if apperr.As(err).Kind != apperr.KindConfig || !strings.Contains(err.Error(), "JIRA_USERNAME and JIRA_PASSWORD") {
+				t.Fatalf("Load() error = %v, want atomic Basic environment error", err)
+			}
+		})
+	}
+
+	t.Run("host override combines with the Profile credential", func(t *testing.T) {
+		clearJiroEnv(t)
+		t.Setenv("JIRA_HOST", "https://environment.example/jira/")
+
+		got, err := Load(Options{ConfigPath: path}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Host != "https://environment.example/jira" || got.Username != "profile-user" || got.Password != "profile-password" {
+			t.Fatalf("Load() = %+v, want host override with Profile credential", got)
+		}
+	})
+
+	t.Run("legacy JIRO connection variables are ignored", func(t *testing.T) {
+		clearJiroEnv(t)
+		t.Setenv("JIRO_HOST", "https://legacy.example")
+		t.Setenv("JIRO_USERNAME", "legacy-user")
+		t.Setenv("JIRO_PASSWORD", "legacy-password")
+		t.Setenv("JIRO_TOKEN", "legacy-token")
+		t.Setenv("JIRO_AUTH_TYPE", "pat")
+		t.Setenv("JIRO_API_VERSION", "9")
+
+		got, err := Load(Options{ConfigPath: path}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Host != "https://profile.example/jira" || got.AuthType != AuthBasic || got.Username != "profile-user" || got.Password != "profile-password" || got.APIVersion != 2 {
+			t.Fatalf("Load() = %+v, legacy connection environment must be ignored", got)
+		}
+	})
+}
+
+func TestLoadUserAgentPrecedence(t *testing.T) {
+	clearJiroEnv(t)
+	path := writeConfig(t, `
+[default]
+host = "https://default.example"
+auth_type = "pat"
+use_keyring = false
+token = "default-token"
+user_agent = "default-agent"
+
+[profiles.inherited]
+host = "https://inherited.example"
+token = "inherited-token"
+
+[profiles.overridden]
+host = "https://overridden.example"
+token = "overridden-token"
+user_agent = "profile-agent"
+`)
+
+	tests := []struct {
+		name, profile, environment, want string
+	}{
+		{name: "default Profile", want: "default-agent"},
+		{name: "named Profile inherits default", profile: "inherited", want: "default-agent"},
+		{name: "named Profile overrides default", profile: "overridden", want: "profile-agent"},
+		{name: "environment overrides selected Profile", profile: "overridden", environment: "environment-agent", want: "environment-agent"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clearJiroEnv(t)
+			if test.environment != "" {
+				t.Setenv("JIRA_USER_AGENT", test.environment)
+			}
+			got, err := Load(Options{ConfigPath: path, Profile: test.profile}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.UserAgent != test.want {
+				t.Fatalf("UserAgent = %q, want %q", got.UserAgent, test.want)
 			}
 		})
 	}
@@ -154,7 +289,7 @@ use_keyring = true
 		want     string
 		wantKind apperr.Kind
 	}{
-		{"environment wins", map[string]string{"JIRO_TOKEN": "env-token"}, store, "env-token", ""},
+		{"environment wins", map[string]string{"JIRA_TOKEN": "env-token"}, store, "env-token", ""},
 		{"keyring wins over toml", nil, store, "keyring-token", ""},
 		{"keyring miss is config error", nil, &memoryStore{secrets: map[string]string{}}, "", apperr.KindConfig},
 	}
@@ -253,7 +388,11 @@ func writeConfig(t *testing.T, body string) string {
 
 func clearJiroEnv(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{"XDG_CONFIG_HOME", "JIRO_CONFIG_FILE", "JIRO_CONFIG", "JIRO_PROFILE", "JIRO_HOST", "JIRO_USERNAME", "JIRO_AUTH_TYPE", "JIRO_API_VERSION", "JIRO_READ_ONLY", "JIRO_USE_KEYRING", "JIRO_PASSWORD", "JIRO_TOKEN"} {
+	for _, name := range []string{
+		"XDG_CONFIG_HOME", "JIRO_CONFIG_FILE", "JIRO_CONFIG", "JIRO_PROFILE", "JIRO_READ_ONLY", "JIRO_USE_KEYRING",
+		"JIRA_HOST", "JIRA_API_VERSION", "JIRA_TOKEN", "JIRA_USERNAME", "JIRA_PASSWORD", "JIRA_USER_AGENT",
+		"JIRO_HOST", "JIRO_API_VERSION", "JIRO_TOKEN", "JIRO_USERNAME", "JIRO_PASSWORD", "JIRO_AUTH_TYPE",
+	} {
 		old, existed := os.LookupEnv(name)
 		if err := os.Unsetenv(name); err != nil {
 			t.Fatal(err)

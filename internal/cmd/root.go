@@ -32,9 +32,6 @@ type app struct {
 
 	configPath string
 	profile    string
-	host       string
-	username   string
-	authType   string
 	output     string
 	quiet      bool
 }
@@ -122,9 +119,6 @@ func (a *app) rootCommand() *cobra.Command {
 	flags := root.PersistentFlags()
 	flags.StringVarP(&a.configPath, "config", "c", "", "config file path")
 	flags.StringVar(&a.profile, "profile", "", "config profile name")
-	flags.StringVar(&a.host, "host", "", "Jira base URL")
-	flags.StringVar(&a.username, "username", "", "Jira username for Basic Auth")
-	flags.StringVar(&a.authType, "auth-type", "", "authentication type: basic or pat")
 	flags.StringVarP(&a.output, "output", "o", "text", "output format: text or json")
 	flags.BoolVar(&a.quiet, "quiet", false, "suppress successful text output")
 
@@ -169,9 +163,6 @@ func (a *app) configOptions() config.Options {
 	return config.Options{
 		ConfigPath: a.configPath,
 		Profile:    a.profile,
-		Host:       a.host,
-		Username:   a.username,
-		AuthType:   a.authType,
 	}
 }
 
@@ -183,6 +174,9 @@ func (a *app) settings() (config.Settings, error) {
 	if settings.APIVersion != 2 {
 		return config.Settings{}, apperr.New(apperr.KindConfig, "jiro v1 supports Jira REST API version 2 only")
 	}
+	if strings.TrimSpace(settings.UserAgent) == "" {
+		settings.UserAgent = defaultUserAgent()
+	}
 	return settings, nil
 }
 
@@ -191,7 +185,7 @@ func (a *app) client() (*jira.Client, config.Settings, error) {
 	if err != nil {
 		return nil, config.Settings{}, err
 	}
-	clientConfig := jira.Config{BaseURL: settings.Host, Username: settings.Username}
+	clientConfig := jira.Config{BaseURL: settings.Host, Username: settings.Username, UserAgent: settings.UserAgent}
 	if settings.AuthType == config.AuthPAT {
 		clientConfig.PAT = settings.Token
 	} else {
@@ -202,6 +196,14 @@ func (a *app) client() (*jira.Client, config.Settings, error) {
 		return nil, config.Settings{}, err
 	}
 	return client, settings, nil
+}
+
+func defaultUserAgent() string {
+	value := strings.TrimSpace(version)
+	if value == "" {
+		value = "dev"
+	}
+	return "jiro/" + value
 }
 
 func (a *app) writableClient() (*jira.Client, config.Settings, error) {

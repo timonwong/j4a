@@ -70,6 +70,11 @@ func TestCanonicalCommandTreeUsesSingularPaths(t *testing.T) {
 	if root.PersistentFlags().Lookup("raw") != nil {
 		t.Fatal("removed --raw flag is still registered")
 	}
+	for _, name := range []string{"host", "username", "auth-type"} {
+		if root.PersistentFlags().Lookup(name) != nil {
+			t.Fatalf("removed --%s flag is still registered", name)
+		}
+	}
 }
 
 func exactCommand(root *cobra.Command, path string) *cobra.Command {

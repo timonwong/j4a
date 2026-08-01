@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -43,7 +44,7 @@ func TestAPICommandStreamsSuccessfulResponseAndReusesAuthentication(t *testing.T
 		if got := request.Header.Get("Accept"); got != "application/json" {
 			t.Fatalf("Accept = %q", got)
 		}
-		if got := request.Header.Get("Accept-Encoding"); got != "identity" {
+		if got := request.Header.Get("Accept-Encoding"); got != "gzip" {
 			t.Fatalf("Accept-Encoding = %q", got)
 		}
 		if got := request.Header.Get("Content-Type"); got != "" {
@@ -249,21 +250,28 @@ func TestAPICommandTypedFieldsReadFilesAndStdin(t *testing.T) {
 	}
 }
 
-func TestAPICommandRejectsInvalidUTF8FieldFileBeforeNetwork(t *testing.T) {
+func TestAPICommandReplacesInvalidUTF8FieldFileWhenEncodingJSON(t *testing.T) {
 	clearCommandEnv(t)
 	fieldPath := filepath.Join(t.TempDir(), "field.txt")
 	if err := os.WriteFile(fieldPath, []byte{0xff}, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Fatal("network must not be reached")
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["invalid"] != "�" {
+			t.Fatalf("invalid field = %q, want replacement rune", body["invalid"])
+		}
+		writer.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
 		"--config", writeCLIConfig(t, server.URL, false), "api", "rest/api/2/example", "-F", "invalid=@" + fieldPath,
 	}, strings.NewReader(""), stdout, stderr)
-	if code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "UTF-8") {
+	if code != 0 || stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
@@ -469,14 +477,17 @@ func TestAPICommandStreamsMultipartStdinWithChunkedTransfer(t *testing.T) {
 	}
 }
 
-func TestAPICommandHeaderDefaultsRemovalProtectionAndLastWins(t *testing.T) {
+func TestAPICommandHeaderDefaultsRemovalProtectionAndRepeatedValues(t *testing.T) {
 	clearCommandEnv(t)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if got := request.Header.Get("Accept"); got != "" {
 			t.Fatalf("Accept = %q", got)
 		}
-		if got := request.Header.Get("X-Value"); got != "last" {
+		if got := request.Header.Values("X-Value"); strings.Join(got, ",") != "first,last" {
 			t.Fatalf("X-Value = %q", got)
+		}
+		if got := request.Header.Values("X-Reset"); strings.Join(got, ",") != "after" {
+			t.Fatalf("X-Reset = %q", got)
 		}
 		if got := request.Header.Get("Accept-Encoding"); got != "gzip" {
 			t.Fatalf("Accept-Encoding = %q", got)
@@ -489,7 +500,8 @@ func TestAPICommandHeaderDefaultsRemovalProtectionAndLastWins(t *testing.T) {
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
 		"--config", writeCLIConfig(t, server.URL, false), "api", "rest/api/2/example",
-		"-H", "Accept:", "-H", "x-value: first", "-H", "X-Value: last", "-H", "Accept-Encoding: gzip",
+		"-H", "Accept:", "-H", "x-value: first", "-H", "X-Value: last",
+		"-H", "X-Reset: before", "-H", "x-reset:", "-H", "X-Reset: after", "-H", "Accept-Encoding: gzip",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 0 || !bytes.Equal(stdout.Bytes(), []byte{0x1f, 0x8b, 0x00, 0x01}) || stderr.Len() != 0 {
 		t.Fatalf("code=%d stdout=%v stderr=%q", code, stdout.Bytes(), stderr.String())
@@ -515,7 +527,7 @@ func TestAPICommandHeaderDefaultsRemovalProtectionAndLastWins(t *testing.T) {
 	}
 }
 
-func TestAPICommandIncludeQuietAndCookieRedaction(t *testing.T) {
+func TestAPICommandIncludeQuietAndCookies(t *testing.T) {
 	clearCommandEnv(t)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Add("Z-Header", "second")
@@ -537,7 +549,7 @@ func TestAPICommandIncludeQuietAndCookieRedaction(t *testing.T) {
 	if !strings.HasPrefix(output, "HTTP/1.1 200 OK\r\n") || strings.Index(output, "A-Header:") > strings.Index(output, "Z-Header:") {
 		t.Fatalf("included headers = %q", output)
 	}
-	if strings.Count(output, "Set-Cookie: <redacted>\r\n") != 2 || strings.Contains(output, "secret=") {
+	if strings.Count(output, "Set-Cookie: secret=") != 2 || !strings.Contains(output, "secret=one") || !strings.Contains(output, "secret=two") {
 		t.Fatalf("cookie output = %q", output)
 	}
 }
@@ -559,8 +571,8 @@ func TestAPICommandIncludeWritesFailureMetadataAndBodyToStderr(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.HasPrefix(stderr.String(), "HTTP/1.1 404 Not Found\r\n") ||
-		!strings.Contains(stderr.String(), "Set-Cookie: <redacted>\r\n") ||
-		!strings.HasSuffix(stderr.String(), "\r\nmissing") || strings.Contains(stderr.String(), "secret=value") {
+		!strings.Contains(stderr.String(), "Set-Cookie: secret=value\r\n") ||
+		!strings.HasSuffix(stderr.String(), "\r\nmissing") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
@@ -590,23 +602,44 @@ func TestAPICommandRedirectPolicy(t *testing.T) {
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	configPath := writeCLIConfig(t, server.URL, false)
-	code := Execute([]string{"--config", configPath, "api", "same"}, strings.NewReader(""), stdout, stderr)
-	if code != 0 || stdout.String() != "final" || stderr.Len() != 0 {
-		t.Fatalf("same-origin code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	for _, test := range []struct {
+		endpoint string
+		args     []string
+	}{
+		{endpoint: "same"},
+		{endpoint: "cross"},
+		{endpoint: "body", args: []string{"-f", "a=b"}},
+	} {
+		stdout.Reset()
+		stderr.Reset()
+		args := []string{"--config", configPath, "api", test.endpoint}
+		args = append(args, test.args...)
+		code := Execute(args, strings.NewReader(""), stdout, stderr)
+		if code != 5 || stdout.Len() != 0 || targetCalls.Load() != 0 ||
+			(!strings.Contains(stderr.String(), "Found") && !strings.Contains(stderr.String(), "Temporary Redirect")) {
+			t.Fatalf("endpoint=%s code=%d calls=%d stdout=%q stderr=%q", test.endpoint, code, targetCalls.Load(), stdout.String(), stderr.String())
+		}
 	}
+}
 
-	stdout.Reset()
-	stderr.Reset()
-	code = Execute([]string{"--config", configPath, "api", "cross"}, strings.NewReader(""), stdout, stderr)
-	if code != 5 || stdout.Len() != 0 || targetCalls.Load() != 0 {
-		t.Fatalf("cross-origin code=%d calls=%d stdout=%q stderr=%q", code, targetCalls.Load(), stdout.String(), stderr.String())
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	code = Execute([]string{"--config", configPath, "api", "body", "-f", "a=b"}, strings.NewReader(""), stdout, stderr)
-	if code != 5 || stdout.Len() != 0 || strings.Contains(stdout.String(), "final") {
-		t.Fatalf("body redirect code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+func TestAPICommandUsesStandardAutomaticGzipDecompression(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Accept-Encoding") != "gzip" {
+			t.Fatalf("Accept-Encoding = %q", request.Header.Get("Accept-Encoding"))
+		}
+		writer.Header().Set("Content-Encoding", "gzip")
+		compressed := gzip.NewWriter(writer)
+		_, _ = io.WriteString(compressed, "decompressed")
+		_ = compressed.Close()
+	}))
+	defer server.Close()
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{
+		"--config", writeCLIConfig(t, server.URL, false), "api", "rest/api/2/example", "--include",
+	}, strings.NewReader(""), stdout, stderr)
+	if code != 0 || stderr.Len() != 0 || !strings.HasSuffix(stdout.String(), "\r\ndecompressed") || strings.Contains(stdout.String(), "Content-Encoding") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
 
@@ -738,7 +771,7 @@ func TestAPICommandEmptyInputFileUsesKnownZeroLength(t *testing.T) {
 	}
 }
 
-func TestAPICommandFieldSizeAndStdinConflicts(t *testing.T) {
+func TestAPICommandFieldSourcesAndStdinConflicts(t *testing.T) {
 	clearCommandEnv(t)
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("network must not be reached")
@@ -750,8 +783,6 @@ func TestAPICommandFieldSizeAndStdinConflicts(t *testing.T) {
 		{"api", "rest/api/2/example", "--input", "-", "-F", "field=@-"},
 		{"api", "rest/api/2/example", "--form", "first=@-", "--form", "second=@-"},
 		{"api", "rest/api/2/example", "--form", "a=b", "-f", "c=d"},
-		{"api", "rest/api/2/example", "--method", "HEAD", "--input", "-"},
-		{"api", "rest/api/2/example", "--method", "CONNECT"},
 		{"api", "rest/api/2/example", "--method="},
 		{"api", "rest/api/2/example", "--input="},
 	}
@@ -764,14 +795,59 @@ func TestAPICommandFieldSizeAndStdinConflicts(t *testing.T) {
 	}
 
 	largePath := filepath.Join(t.TempDir(), "large.txt")
-	large := bytes.Repeat([]byte("x"), apiFieldJSONLimit+1)
+	large := bytes.Repeat([]byte("x"), (16<<20)+1)
 	if err := os.WriteFile(largePath, large, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	largeServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body["large"]) != len(large) {
+			t.Fatalf("large field length = %d, want %d", len(body["large"]), len(large))
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer largeServer.Close()
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	code := Execute([]string{"--config", configPath, "api", "rest/api/2/example", "-F", "large=@" + largePath}, strings.NewReader(""), stdout, stderr)
-	if code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "16 MiB") {
+	code := Execute([]string{"--config", writeCLIConfig(t, largeServer.URL, false), "api", "rest/api/2/example", "-F", "large=@" + largePath}, strings.NewReader(""), stdout, stderr)
+	if code != 0 || stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("large code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestAPICommandAllowsArbitraryMethodsAndBodiesOnReadMethods(t *testing.T) {
+	clearCommandEnv(t)
+	tests := []struct {
+		method, body string
+	}{
+		{method: "propfind", body: "custom"},
+		{method: "GET", body: "get-body"},
+		{method: "HEAD", body: "head-body"},
+		{method: "OPTIONS", body: "options-body"},
+	}
+	for _, test := range tests {
+		t.Run(test.method, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				body, err := io.ReadAll(request.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if request.Method != strings.ToUpper(test.method) || string(body) != test.body {
+					t.Fatalf("method=%q body=%q", request.Method, body)
+				}
+				writer.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+			stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+			code := Execute([]string{
+				"--config", writeCLIConfig(t, server.URL, false), "api", "rest/api/2/example", "--method", test.method, "--input", "-",
+			}, strings.NewReader(test.body), stdout, stderr)
+			if code != 0 || stdout.Len() != 0 || stderr.Len() != 0 {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+		})
 	}
 }
 

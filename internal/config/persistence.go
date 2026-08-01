@@ -85,7 +85,7 @@ func CommitLogin(draft Draft, candidate Settings, store SecretStore) error {
 		return err
 	}
 	secret := normalized.Secret()
-	if strings.TrimSpace(secret) == "" {
+	if secret == "" {
 		return apperr.New(apperr.KindInvalidInput, credentialName(normalized.AuthType)+" must not be empty")
 	}
 	if err := draft.source.ensureUnchanged(); err != nil {
@@ -316,6 +316,9 @@ func resolveDraft(profile string, values values) (Settings, error) {
 	}
 	if values.useKeyring != nil {
 		settings.UseKeyring = *values.useKeyring
+	}
+	if values.userAgent != nil {
+		settings.UserAgent = *values.userAgent
 	}
 	if values.password != nil {
 		settings.Password = *values.password

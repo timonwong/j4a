@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"strings"
-
 	"github.com/spf13/cobra"
 	"github.com/timonwong/jiro/internal/output"
 )
@@ -70,21 +68,22 @@ func schemaDocument() cliSchema {
 		Program:         "jiro",
 		Platform:        "Jira Data Center/Server REST API v2",
 		GlobalFlags: []flagSchema{
-			flag("config", "c", "path"), flag("profile", "", "string"), flag("host", "", "url"),
-			flag("username", "", "string"), flag("auth-type", "", "enum:basic|pat"),
+			flag("config", "c", "path"), flag("profile", "", "string"),
 			flagDefault("output", "o", "enum:text|json", "text"),
 			flag("quiet", "", "boolean"),
 		},
 		Commands: []commandSchema{
 			commandWithFlags("cache refresh", nil, true, "", nil, object("refreshed", "path", "fieldCount", "fetchedAt", "expiresAt", "instance", "principal")),
-			normalizedCommand(commandSchema{Name: "auth login", Auth: false, Mutating: true, Flags: []flagSchema{flagDefault("use-keyring", "", "boolean", true)}, JSONData: object("profile", "host", "authType", "credentialStore", "user")}),
+			normalizedCommand(commandSchema{Name: "auth login", Auth: false, Mutating: true, Flags: []flagSchema{
+				flagDefault("use-keyring", "", "boolean", true), flag("password-stdin", "", "boolean"), flag("token-stdin", "", "boolean"),
+			}, JSONData: object("profile", "host", "authType", "credentialStore", "user")}),
 			normalizedCommand(commandSchema{Name: "auth logout", Auth: false, Mutating: true, JSONData: object("profile", "credentialStore", "credentialRemoved", "environmentCredentialActive")}),
 			normalizedCommand(commandSchema{Name: "auth status", Auth: true, Mutating: false, JSONData: object("profile", "instance", "authType", "user")}),
 			{
 				Name: "api", Auth: true, Mutating: true, MutationMode: "http_method",
 				ReadOnlyMethods: append([]string(nil), apiReadOnlyMethodNames...), OutputMode: "raw_http", SupportsGlobalOutput: false,
 				Args: "ENDPOINT", Flags: []flagSchema{
-					flagDefault("method", "X", "enum:"+strings.Join(apiMethods, "|"), "GET"),
+					flagDefault("method", "X", "string", "GET"),
 					flag("input", "", "path-or-stdin"), repeatableFlag("string-field", "f", "key=value"), repeatableFlag("field", "F", "key=value"),
 					repeatableFlag("form", "", "key=value"), repeatableFlag("header", "H", "header"),
 					flagDefault("timeout", "", "duration", "30s"), flag("insecure", "", "boolean"), flag("include", "i", "boolean"),

@@ -15,7 +15,7 @@ import (
 	"github.com/timonwong/jiro/internal/apperr"
 )
 
-const defaultUserAgent = "jiro/1"
+const defaultUserAgent = "jiro/dev"
 
 // Config configures a Client. PAT uses Jira's Bearer authentication; Basic
 // authentication is used when Username and Password are supplied.

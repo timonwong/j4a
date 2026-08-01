@@ -3,13 +3,11 @@ package jira
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/timonwong/jiro/internal/apperr"
 )
@@ -17,18 +15,15 @@ import (
 // StreamRequest describes one raw authenticated request relative to the
 // Client's Jira Instance. The caller owns the returned response body.
 type StreamRequest struct {
-	Method          string
-	Endpoint        string
-	Query           []QueryParameter
-	Header          http.Header
-	Body            io.Reader
-	ContentLength   int64
-	Timeout         time.Duration
-	Insecure        bool
-	FollowRedirects bool
+	Method        string
+	Endpoint      string
+	Query         []QueryParameter
+	Header        http.Header
+	Body          io.Reader
+	ContentLength int64
+	Timeout       time.Duration
+	Insecure      bool
 }
-
-const maximumStreamRedirects = 5
 
 // QueryParameter is one ordered query entry appended after the endpoint's
 // existing query string. Repeated keys are preserved.
@@ -37,8 +32,8 @@ type QueryParameter struct {
 	Value string
 }
 
-// ValidateRelativeEndpoint rejects endpoints that could escape or ambiguously
-// rewrite the configured Jira Instance path.
+// ValidateRelativeEndpoint rejects only endpoints that select another origin.
+// All other URL validation is delegated to Go's HTTP stack.
 func ValidateRelativeEndpoint(endpoint string) error {
 	if endpoint == "" {
 		return apperr.New(apperr.KindInvalidInput, "API endpoint must not be empty")
@@ -47,81 +42,14 @@ func ValidateRelativeEndpoint(endpoint string) error {
 		return apperr.New(apperr.KindInvalidInput, "API endpoint must be relative to the Jira Instance")
 	}
 	parsed, err := url.Parse(endpoint)
-	if err != nil {
-		return apperr.Wrap(apperr.KindInvalidInput, err, "invalid API endpoint")
-	}
-	if parsed.IsAbs() || parsed.Host != "" || parsed.Opaque != "" {
+	if err == nil && (parsed.IsAbs() || parsed.Host != "" || parsed.Opaque != "") {
 		return apperr.New(apperr.KindInvalidInput, "API endpoint must be relative to the Jira Instance")
-	}
-	if parsed.Fragment != "" || strings.Contains(endpoint, "#") {
-		return apperr.New(apperr.KindInvalidInput, "API endpoint must not contain a fragment")
-	}
-	if parsed.Path == "" {
-		return apperr.New(apperr.KindInvalidInput, "API endpoint path must not be empty")
-	}
-
-	if err := validateRecursivelyDecodedEndpoint(endpointPath(endpoint), "path", url.PathUnescape, validateDecodedEndpointPath); err != nil {
-		return err
-	}
-	if err := validateRecursivelyDecodedEndpoint(parsed.RawQuery, "query", url.QueryUnescape, validateDecodedEndpointQuery); err != nil {
-		return err
-	}
-	return nil
-}
-
-func validateRecursivelyDecodedEndpoint(value, component string, decode func(string) (string, error), validate func(string) error) error {
-	decoded := value
-	for depth := 0; depth < 8; depth++ {
-		unescaped, err := decode(decoded)
-		if err != nil {
-			return apperr.Wrap(apperr.KindInvalidInput, err, "invalid API endpoint %s encoding", component)
-		}
-		if err := validate(unescaped); err != nil {
-			return err
-		}
-		if unescaped == decoded {
-			return nil
-		}
-		decoded = unescaped
-	}
-	return apperr.New(apperr.KindInvalidInput, "API endpoint "+component+" encoding is too deeply nested")
-}
-
-func endpointPath(endpoint string) string {
-	path, _, _ := strings.Cut(endpoint, "?")
-	return path
-}
-
-func validateDecodedEndpointPath(path string) error {
-	if err := validateDecodedEndpointCharacters(path, "path"); err != nil {
-		return err
-	}
-	for _, segment := range strings.Split(path, "/") {
-		if segment == "." || segment == ".." {
-			return apperr.New(apperr.KindInvalidInput, "API endpoint path must not contain traversal segments")
-		}
-	}
-	return nil
-}
-
-func validateDecodedEndpointQuery(query string) error {
-	return validateDecodedEndpointCharacters(query, "query")
-}
-
-func validateDecodedEndpointCharacters(value, component string) error {
-	if strings.ContainsRune(value, '\\') {
-		return apperr.New(apperr.KindInvalidInput, "API endpoint "+component+" must not contain backslashes")
-	}
-	for _, char := range value {
-		if unicode.IsControl(char) {
-			return apperr.New(apperr.KindInvalidInput, "API endpoint "+component+" must not contain control characters")
-		}
 	}
 	return nil
 }
 
 // Stream sends one authenticated request without buffering its request or
-// response body. It disables automatic decompression and connection retries.
+// response body. It uses Go's standard compression and connection semantics.
 func (c *Client) Stream(ctx context.Context, input StreamRequest) (*http.Response, error) {
 	if err := ValidateRelativeEndpoint(input.Endpoint); err != nil {
 		return nil, err
@@ -185,17 +113,8 @@ func (c *Client) streamEndpoint(endpoint string, parameters []QueryParameter) st
 func (c *Client) streamHTTPClient(input StreamRequest) (*http.Client, error) {
 	client := *c.httpClient
 	client.Timeout = input.Timeout
-	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
-		if !input.FollowRedirects {
-			return fmt.Errorf("redirects are not allowed for this request")
-		}
-		if len(via) > maximumStreamRedirects {
-			return fmt.Errorf("stopped after %d redirects", maximumStreamRedirects)
-		}
-		if !sameOrigin(via[0].URL, request.URL) {
-			return fmt.Errorf("redirect changed Jira Instance origin")
-		}
-		return nil
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
 	}
 
 	transport := client.Transport
@@ -210,8 +129,6 @@ func (c *Client) streamHTTPClient(input StreamRequest) (*http.Client, error) {
 		return &client, nil
 	}
 	clone := base.Clone()
-	clone.DisableCompression = true
-	clone.DisableKeepAlives = true
 	clone.ForceAttemptHTTP2 = false
 	clone.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
 	protocols := new(http.Protocols)
@@ -228,20 +145,4 @@ func (c *Client) streamHTTPClient(input StreamRequest) (*http.Client, error) {
 	clone.TLSClientConfig = tlsConfig
 	client.Transport = clone
 	return &client, nil
-}
-
-func sameOrigin(first, second *url.URL) bool {
-	return strings.EqualFold(first.Scheme, second.Scheme) &&
-		strings.EqualFold(first.Hostname(), second.Hostname()) &&
-		originPort(first) == originPort(second)
-}
-
-func originPort(value *url.URL) string {
-	if port := value.Port(); port != "" {
-		return port
-	}
-	if strings.EqualFold(value.Scheme, "https") {
-		return "443"
-	}
-	return "80"
 }

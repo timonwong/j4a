@@ -19,10 +19,6 @@ func (a *app) configureCompletions(root *cobra.Command) {
 		}
 		return names, cobra.ShellCompDirectiveNoFileComp
 	})
-	mustRegisterFlagCompletion(root, "auth-type", fixedCompletions(
-		cobra.CompletionWithDesc("basic", "Username and password authentication"),
-		cobra.CompletionWithDesc("pat", "Personal Access Token authentication"),
-	))
 	mustRegisterFlagCompletion(root, "output", fixedCompletions(
 		cobra.CompletionWithDesc("text", "Human-readable output"),
 		cobra.CompletionWithDesc("json", "Versioned machine-readable output"),
@@ -34,8 +30,8 @@ func (a *app) configureCompletions(root *cobra.Command) {
 		http.MethodPost: "Create or invoke a resource", http.MethodPut: "Replace a resource", http.MethodPatch: "Update a resource",
 		http.MethodDelete: "Delete a resource",
 	}
-	methodCompletions := make([]cobra.Completion, 0, len(apiMethods))
-	for _, method := range apiMethods {
+	methodCompletions := make([]cobra.Completion, 0, len(apiMethodSuggestions))
+	for _, method := range apiMethodSuggestions {
 		methodCompletions = append(methodCompletions, cobra.CompletionWithDesc(method, descriptions[method]))
 	}
 	mustRegisterFlagCompletion(api, "method", fixedCompletions(methodCompletions...))
