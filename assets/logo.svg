@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 410 120" role="img" aria-labelledby="title desc">
+  <title id="title">JIRO wordmark</title>
+  <desc id="desc">The complete JIRO wordmark follows a terminal prompt.</desc>
+  <g fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m18 36 16 24-16 24"/>
+    <path d="M58 30h52v39c0 16-10 24-24 24-11 0-19-5-23-14"/>
+    <path d="M139 30h34m-17 0v62m-17 0h34"/>
+    <path d="M205 92V30h28c14 0 23 7 23 18s-9 18-23 18h-28m27 0 29 26"/>
+    <circle cx="331" cy="61" r="32"/>
+  </g>
+</svg>

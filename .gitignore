@@ -6,6 +6,10 @@
 .DS_Store
 /.vscode/
 
+# Keep the fixed README wordmark; ignore all other logo explorations and assets.
+/assets/*
+!/assets/logo.svg
+
 # Local credentials and private keys.
 .env
 .env.*
