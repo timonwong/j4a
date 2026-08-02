@@ -1,0 +1,20 @@
+-- input.md --
+3. deploy
+   - linux
+     1. amd64
+     2. arm64
+   - mac
+4. verify
+   1. smoke
+      - [x] cli
+      - [ ] api
+-- want.jira --
+# deploy
+#* linux
+#*# amd64
+#*# arm64
+#* mac
+# verify
+## smoke
+##* \[x\] cli
+##* \[ \] api

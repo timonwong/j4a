@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/mattn/go-isatty"
@@ -209,7 +210,7 @@ func (a *app) authStatusCommand() *cobra.Command {
 				Rows: [][]string{
 					{"Profile", result.Profile}, {"Jira Instance", result.Instance},
 					{"Auth Type", string(result.AuthType)}, {"User", displayUser(result.User)},
-					{"Active", stringValue(result.User.Active)},
+					{"Active", strconv.FormatBool(result.User.Active)},
 				},
 			})
 		},

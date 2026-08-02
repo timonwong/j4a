@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -245,19 +244,6 @@ func BuildIssueJQL(options IssueListJQLOptions) (string, error) {
 	return query + " ORDER BY updated DESC", nil
 }
 
-func buildIssueJQL(raw, project, status, assignee, issueType string) string {
-	query, err := BuildIssueJQL(IssueListJQLOptions{
-		RawJQL: raw,
-		Filters: IssueListJQLFilters{
-			Project: project, Status: status, Assignee: assignee, IssueType: issueType,
-		},
-	})
-	if err != nil {
-		return "ORDER BY updated DESC"
-	}
-	return query
-}
-
 func splitJQLOrder(raw string) (string, string) {
 	raw = strings.TrimSpace(raw)
 	if index := strings.LastIndex(strings.ToLower(raw), " order by "); index >= 0 {
@@ -435,20 +421,4 @@ func issueRows(issues []jira.Issue) [][]string {
 		rows = append(rows, []string{issue.Key, issue.Summary, status, assignee})
 	}
 	return rows
-}
-
-func sortedFieldKeys(fields map[string]any) []string {
-	keys := make([]string, 0, len(fields))
-	for key := range fields {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func stringValue(value any) string {
-	if value == nil {
-		return ""
-	}
-	return fmt.Sprint(value)
 }

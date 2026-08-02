@@ -1,0 +1,58 @@
+-- input.md --
+
+
+# Release {panel}
+
+Intro with **bold _nested_**, ~~old~~, `a|{b}`, [guide](../guide "ignored"), and ![diagram](<images/a,b|c.png> "ignored").
+Wrapped
+line\
+forced.
+
+3. Deploy
+   - Linux
+     1. `amd64`
+     2. `arm64`
+   - Verify
+
+> **Note**
+>
+> h2. authored and [docs](https://example.com/docs).
+
+| Feature | Detail |
+| :--- | ---: |
+| `parser` | [Docs](https://example.com?q=a%7Cb) and literal \| pipe |
+| Status | ~~done~~ with **care** |
+
+```JS title=ignored
+const value = "{panel}";
+```
+
+---
+
+-- want.jira --
+h1. Release \{panel\}
+
+Intro with *bold _nested_*, -old-, {{a\|\{b\}}}, [guide|../guide], and !images/a,b\|c.png|alt=diagram!. Wrapped line\\
+forced.
+
+# Deploy
+#* Linux
+#*# {{amd64}}
+#*# {{arm64}}
+#* Verify
+
+{quote}
+*Note*
+
+h2\. authored and [docs|https://example.com/docs].
+{quote}
+
+||Feature||Detail||
+|{{parser}}|[Docs|https://example.com?q=a%7Cb] and literal \| pipe|
+|Status|-done- with *care*|
+
+{code:language=javascript}
+const value = "{panel}";
+{code}
+
+----

@@ -68,6 +68,11 @@ func TestBuildIssueJQLTypedFilters(t *testing.T) {
 			},
 			want: `(priority = High) AND labels IN ("agent") ORDER BY created DESC`,
 		},
+		{
+			name:    "applies an order-only raw expression after typed filters",
+			options: IssueListJQLOptions{RawJQL: `ORDER BY created DESC`, Filters: IssueListJQLFilters{Project: "OPS"}},
+			want:    `project = "OPS" ORDER BY created DESC`,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -106,25 +111,5 @@ func TestBuildIssueJQLRejectsUnsafeOperands(t *testing.T) {
 		if _, err := BuildIssueJQL(options); err == nil {
 			t.Fatalf("BuildIssueJQL(%+v) error = nil, want invalid operand error", options)
 		}
-	}
-}
-
-func TestBuildIssueJQLPreservesExplicitOrder(t *testing.T) {
-	tests := []struct {
-		name                                string
-		raw, project, status, assignee, typ string
-		want                                string
-	}{
-		{"default order", "", "OPS", "", "", "", `project = "OPS" ORDER BY updated DESC`},
-		{"raw order", `project = OPS ORDER BY rank ASC`, "", "", "", "", `project = OPS ORDER BY rank ASC`},
-		{"filters before raw order", `labels = agent ORDER BY created DESC`, "OPS", "", "", "", `(labels = agent) AND project = "OPS" ORDER BY created DESC`},
-		{"order only", `ORDER BY created DESC`, "OPS", "", "", "", `project = "OPS" ORDER BY created DESC`},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := buildIssueJQL(test.raw, test.project, test.status, test.assignee, test.typ); got != test.want {
-				t.Fatalf("buildIssueJQL() = %q, want %q", got, test.want)
-			}
-		})
 	}
 }

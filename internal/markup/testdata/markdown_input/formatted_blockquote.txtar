@@ -1,0 +1,14 @@
+-- input.md --
+> **Quoted _format_**
+>
+> h2. authored
+>
+> ~~done~~ and `code`
+-- want.jira --
+{quote}
+*Quoted _format_*
+
+h2\. authored
+
+-done- and {{code}}
+{quote}

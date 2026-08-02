@@ -1,39 +1,53 @@
 package markup_test
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/timonwong/jiro/internal/markup"
+	"golang.org/x/tools/txtar"
 )
 
-type contractGolden struct {
-	Input string `json:"input"`
-	Want  string `json:"want"`
-}
-
-func TestToJiraMatchesCompleteContractGolden(t *testing.T) {
+func TestToJiraGolden(t *testing.T) {
 	t.Parallel()
-
-	contents, err := os.ReadFile("testdata/complete_contract_document.json")
+	entries, err := os.ReadDir("testdata/markdown_input")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var fixture contractGolden
-	if err := json.Unmarshal(contents, &fixture); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := markup.ToJira(fixture.Input, markup.Markdown)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != fixture.Want {
-		t.Fatalf("ToJira() = %q, want %q", got, fixture.Want)
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".txtar" {
+			continue
+		}
+		entry := entry
+		t.Run(strings.TrimSuffix(entry.Name(), ".txtar"), func(t *testing.T) {
+			t.Parallel()
+			archive, err := txtar.ParseFile(filepath.Join("testdata/markdown_input", entry.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			sections := make(map[string][]byte, len(archive.Files))
+			for _, file := range archive.Files {
+				sections[file.Name] = file.Data
+			}
+			for _, required := range []string{"input.md", "want.jira"} {
+				if _, ok := sections[required]; !ok {
+					t.Fatalf("missing required txtar section %q", required)
+				}
+			}
+			got, err := markup.ToJira(string(sections["input.md"]), markup.Markdown)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := strings.TrimSuffix(string(sections["want.jira"]), "\n")
+			if got != want {
+				t.Fatalf("ToJira() = %q, want %q", got, want)
+			}
+		})
 	}
 }
 

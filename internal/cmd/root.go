@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -272,26 +271,6 @@ func exactArgs(count int) cobra.PositionalArgs {
 	}
 }
 
-func optionalArgs(max int) cobra.PositionalArgs {
-	return func(_ *cobra.Command, args []string) error {
-		if len(args) > max {
-			return apperr.New(apperr.KindInvalidInput, fmt.Sprintf("expected at most %d argument(s), got %d", max, len(args)))
-		}
-		return nil
-	}
-}
-
-func pageQuery(startAt, maxResults int) url.Values {
-	query := url.Values{}
-	if startAt > 0 {
-		query.Set("startAt", fmt.Sprint(startAt))
-	}
-	if maxResults > 0 {
-		query.Set("maxResults", fmt.Sprint(maxResults))
-	}
-	return query
-}
-
 func validatePagination(offset, limit int) error {
 	if offset < 0 {
 		return apperr.New(apperr.KindInvalidInput, "offset must not be negative")
@@ -300,10 +279,6 @@ func validatePagination(offset, limit int) error {
 		return apperr.New(apperr.KindInvalidInput, "limit must not be negative")
 	}
 	return nil
-}
-
-func issuePath(key string) string {
-	return "rest/api/2/issue/" + url.PathEscape(key)
 }
 
 func joinNames(values []string) string {

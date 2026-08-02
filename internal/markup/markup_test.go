@@ -1,10 +1,8 @@
 package markup
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 )
@@ -13,11 +11,6 @@ type markdownConversionCase struct {
 	name  string
 	input string
 	want  string
-}
-
-type markdownGoldenFixture struct {
-	Input string `json:"input"`
-	Want  string `json:"want"`
 }
 
 func assertMarkdownConversions(t *testing.T, tests []markdownConversionCase) {
@@ -48,30 +41,6 @@ func assertMarkdownConversionError(t *testing.T, input string, want ConversionEr
 	}
 	if *conversionErr != want {
 		t.Fatalf("ConversionError = %+v, want %+v", conversionErr, want)
-	}
-}
-
-func TestToJiraMatchesComplexStructureGoldenFixtures(t *testing.T) {
-	t.Parallel()
-	for _, name := range []string{"complex_mixed_list", "formatted_blockquote", "formatted_table"} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			contents, err := os.ReadFile("testdata/" + name + ".json")
-			if err != nil {
-				t.Fatal(err)
-			}
-			var fixture markdownGoldenFixture
-			if err := json.Unmarshal(contents, &fixture); err != nil {
-				t.Fatal(err)
-			}
-			got, err := ToJira(fixture.Input, Markdown)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != fixture.Want {
-				t.Fatalf("ToJira() = %q, want %q", got, fixture.Want)
-			}
-		})
 	}
 }
 
