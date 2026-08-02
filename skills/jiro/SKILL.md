@@ -1,6 +1,6 @@
 ---
 name: jiro
-description: Manage Jira Data Center and Server with the jiro CLI. Use for profile authentication; issue search and mutation; project, field, transition, link, comment, or bulk workflows; automation through jiro's stable JSON contract; or authenticated raw Jira REST requests through jiro api.
+description: Manage Jira Data Center and Server with the jiro CLI. Use for profile authentication; issue search and mutation; project, field, transition, link, comment, or bulk workflows; JFM and Jira Markup conversion; automation through jiro's stable JSON contract; or authenticated raw Jira REST requests through jiro api.
 ---
 
 # Jiro
@@ -20,6 +20,8 @@ jiro COMMAND --help
 Treat `jiro schema --output=json` as the source of truth for commands, flags, mutation status, output shapes, and exit codes. Use the singular resource namespaces `issue`, `project`, and `field`. jiro targets Jira Data Center and Server REST API v2; verify compatibility before acting on Jira Cloud or ADF data.
 
 When the task involves authentication or Profile management, or the effective Jira Instance or Credential is uncertain or rejected, read [Authentication and profiles](references/authentication.md) before Jira work.
+
+When the task authors or diagnoses Jiro Flavored Markdown, converts between JFM and Jira Markup, or needs rich-text conversion warnings, read [JFM workflows](references/jfm.md) before choosing flags or interpreting output. Standalone `jiro jfm` conversion is offline and does not enter the Jira mutation loop.
 
 ## Inspect
 
@@ -48,7 +50,7 @@ Resolve Jira-owned names and write semantics before mutating:
 - Match a transition by the exact ID, unique name, or unique destination status returned by `issue list-transitions`.
 - Resolve a Link Type with `issue link types`; preserve the outward direction from `FROM` to `--to`.
 - Use `customfield_N` directly when known. Use a human alias only after `field list --custom` or `cache refresh` proves it is unique for the current Jira Instance and Principal. Treat `stale_field_cache` as a verification risk: disclose it and verify the written field directly. Direct IDs bypass alias metadata.
-- Determine whether description or comment input is Jira Markup or Jiro Flavored Markdown (JFM). Jira Markup is the default; request conversion with `--input-format=jfm`. `markdown` is a permanent alias for `jfm`.
+- Determine whether description or comment input is Jira Markup or Jiro Flavored Markdown (JFM). Jira Markup is the byte-preserving default; request JFM conversion with `--input-format=jfm`.
 - Use a file or `-` for stdin for long text, keeping inline and file forms mutually exclusive.
 - Resolve Sprint input as a numeric ID, `active`, or a case-insensitive name substring. Confirm that the first match in Jira board/page order is intended.
 - Treat `--component` and `--fix-version` updates as full replacements. Use the single value `none` only for an empty final field.
@@ -86,8 +88,6 @@ jiro issue link delete 10001 --output=json
 ```
 
 `--field key=value` decodes JSON first and otherwise uses a string; quote object and array values so the shell passes valid JSON. Use the transition proven during preflight. Delete an Issue Link by its Jira Link ID.
-
-Use the offline `jiro jfm to-jira [FILE|-]` and `jiro jfm from-jira [FILE|-]` filters when a task requires format conversion without a Jira request. They do not load Jira configuration, credentials, or network state. Text mode writes the exact converted document; use `--output=json` when structured warnings are required.
 
 Preserve partial results. A failed Sprint move can leave a newly created issue or ordinary update fields in Jira; retain the returned Issue Key and updated fields when reporting the failure.
 
