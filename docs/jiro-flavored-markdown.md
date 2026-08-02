@@ -1,433 +1,469 @@
-# Jiro Flavored Markdown
+# Jiro Flavored Markdown Specification
 
-This document defines the bidirectional conversion contract between Jira Markup and Jiro Flavored Markdown (JFM).
+## 1. Status and conformance
 
-## Product boundary
+Jiro Flavored Markdown (JFM) is a Markdown dialect for representing Jira Markup while retaining as much formatting information as Jira Markup can express. This specification defines both JFM to Jira Markup conversion and Jira Markup to canonical JFM conversion.
 
-- The first version is a pair of pure string conversion capabilities between Jira Markup and JFM.
-- It does not define Jira network access, Issue or comment retrieval, command output, or a complete Issue export document.
+The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are normative requirements.
 
-## Output dialect
+A conforming converter MUST implement both conversion directions. Supporting only one direction is not JFM conformance.
 
-- JFM is based on CommonMark with table and strikethrough syntax.
-- It is distinct from Markdown Input.
-- Supported constructs round-trip to canonical Jira Markup, but neither direction preserves the original source bytes or non-canonical spelling.
-- Inserted, superscript, subscript, and colored text use controlled inline HTML.
-- Jira citation notation is not supported in the first version.
+JFM uses [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) as its Markdown foundation and adds tables, strikethrough, controlled inline HTML, and the directives defined here. Where this specification does not override CommonMark, CommonMark rules apply.
+
+JFM is a semantic and input-language superset of jiro Markdown Input. Every document accepted by Markdown Input MUST remain convertible as JFM. JFM may preserve information that Markdown Input historically discarded, so the resulting Jira Markup is not required to be byte-for-byte identical.
+
+JFM is distinct from Markdown Input and from unrelated Jira-oriented Markdown dialects. A JFM document has no required front matter, magic header, or embedded format-version directive. New syntax SHOULD be additive; an older converter encountering an unknown directive applies the literal-fallback rules in this specification.
+
+The following CommonMark-looking forms have explicit JFM boundaries:
+
 - Task-list markers have no checkbox semantics and remain ordinary list text.
-- Bare URLs have no autolink semantics; only explicit Markdown links and angle-bracket autolinks are links.
-- Reference-style links and images are accepted only as `FromJFM` input syntax. `ToJFM` always emits canonical inline syntax or a jiro directive and never emits reference definitions.
-- JFM does not repair malformed Markdown or implicitly interpret raw Jira Markup islands.
-- A JFM document has no required front matter, magic header, or embedded format-version directive; it remains directly readable as Markdown.
-- JFM capability evolves with jiro releases. New syntax should be additive where possible, and an older parser handles unknown directives through the established literal fallback and warning contract.
+- Bare URLs and email addresses have no autolink semantics. Only explicit links and angle-bracket autolinks are links.
+- Reference-style links and images are accepted as input, but canonical JFM uses inline syntax or directives and does not emit reference definitions.
+- Raw Jira Markup embedded in JFM has no special meaning.
+- Malformed Markdown is not repaired before conversion.
+- Jira citation notation is not defined by this version of JFM and follows the unsupported-notation rules.
 
-## Canonical document serialization
+## 2. Conversion model
+
+Conversion is deterministic and best-effort. Every recognized construct belongs to one of four classes:
+
+1. **Reversible**: all supported semantics are retained. Conversion produces no warning and the construct participates in canonical round-trip.
+2. **Canonicalized**: semantics are retained but source spelling is normalized. Conversion produces no warning and the canonical form participates in round-trip.
+3. **Lossy**: the base construct is recognized, but some information has no target representation. The converter MUST convert every representable part, MUST discard only the unrepresentable information, and MUST produce a warning.
+4. **Literal fallback**: the converter cannot determine safe semantic boundaries. The complete construct MUST remain visible as escaped literal text and MUST produce a warning.
+
+A converter MUST NOT use literal fallback merely because a recognized construct contains unsupported metadata. If the base structure can be converted safely, the unsupported information is lossy and the recognized structure continues through conversion.
+
+Unknown or malformed directives, malformed controlled HTML, and constructs whose closing boundary cannot be determined safely use literal fallback. Unsupported source content MUST NOT cause surrounding recognized content to be dropped.
+
+## 3. Canonical documents
+
+Canonical JFM obeys these rules:
 
 - Top-level blocks are separated by exactly one blank line.
-- The complete converted document has no leading or trailing whitespace.
-- Structural output uses LF line endings and does not append a terminal newline.
-- A source newline inside an ordinary paragraph without Jira `\\` forced-break notation normalizes to one space.
-- Literal code and noformat bodies preserve their authored whitespace, including their internal LF or CRLF line endings, and do not use structural line-ending or paragraph normalization.
+- A document has no leading or trailing whitespace and no terminal newline.
+- Structural line endings are LF.
+- Soft line breaks in ordinary paragraphs become one space.
+- Hard line breaks use a backslash followed by LF.
+- Literal code and noformat bodies preserve their authored internal whitespace and line endings.
 - Panel, quote, list, table, and other non-literal bodies use canonical LF line endings.
+- Headings use ATX form without closing hashes.
+- Unordered lists use `-`; ordered lists use `1.`.
+- Nested list levels use four spaces of indentation.
+- Strong emphasis uses `**`, emphasis uses `*`, and strikethrough uses `~~`.
+- Jira-specific constructs use their canonical directive form when ordinary Markdown cannot preserve their semantics.
+- Reference definitions, alternate list markers, setext headings, tilde fences, trailing-space hard breaks, and other accepted input spellings need not survive canonicalization.
 
-## Escaping
+Canonical Jira Markup is the deterministic Jira representation defined by the mappings in this specification. Source spelling, delimiter choice, list ordinal values, reference definitions, attribute case, and attribute order need not survive conversion.
 
-- Conversion parses source escaping in its original Jira or JFM context, produces semantic literal content, and then serializes that content for the target context.
-- A Jira backslash decodes an escaped Jira delimiter; doubled backslashes decode to one literal backslash.
-- A backslash before a non-delimiter remains ordinary text without a warning, including Windows-style paths such as `C:\temp`.
-- Re-encoding prevents decoded Jira notation from becoming unintended Markdown formatting and prevents decoded JFM text from becoming unintended Jira notation.
-- A warning is reserved for an escape that truncates or prevents closure of a recognized construct.
-- `FromJFM` decodes valid CommonMark named and numeric character references to their semantic Unicode characters before applying Jira-context escaping.
-- `ToJFM` serializes semantic Unicode characters directly and does not introduce character references; Markdown-sensitive characters are escaped only as required by their output context.
-- An invalid character reference is ordinary visible text and does not produce a warning.
-- Input strings may contain invalid UTF-8 bytes. Each invalid byte is replaced with U+FFFD, produces its own warning, and counts as one source column for location reporting.
-- Invalid UTF-8 is a source-content problem rather than a fatal error; both conversion directions always return valid UTF-8 text when they complete successfully.
+Warning-free conversion MUST stabilize semantically:
 
-## Directive grammar
+- Jira Markup → JFM → Jira Markup → JFM produces the same canonical JFM after the first conversion.
+- JFM → Jira Markup → JFM → Jira Markup produces the same canonical Jira Markup after the first conversion.
 
-- Inline directives use `:name[content]{attributes}`.
-- Container directives use at least three opening colons, a name and optional attributes, a body, and a closing fence with the same number of colons.
-- Input permits spaces or tabs between attributes and around `=`, but an attribute list never spans a physical line.
-- An inline directive permits no whitespace between its name, content brackets, and attribute braces.
-- A container opening fence permits only whitespace after its optional attribute list.
-- Canonical serialization uses one ASCII space between attributes, no whitespace around `=`, and no trailing whitespace.
-- A directive name matches `[A-Za-z][A-Za-z0-9-]*`; an attribute name matches `[A-Za-z][A-Za-z0-9_-]*`.
-- JFM does not support `.class` or `#id` attribute shorthand.
-- A Jira parameter name that cannot be represented by the attribute-name grammar makes the complete Jira construct remain visible and produces a warning rather than being renamed.
-- An invalid directive or attribute identifier in JFM makes the complete directive use escaped Jira literal fallback and produces a warning.
-- Directive names are matched case-insensitively and serialize as canonical lowercase names.
-- Known attribute names are matched case-insensitively and serialize with their directive-defined canonical spelling, including Jira camelCase names.
-- Attributes that differ only by case still count as duplicates and produce warnings.
-- An outer container fence is longer than any colon fence that appears as a nested container in its body.
-- Canonical serialization uses the shortest safe fence length.
-- Every directive defines a fixed canonical order for its known attributes; source attribute order is not preserved for known attributes.
-- Unknown attributes remain after known attributes and retain their relative source order. Each unknown attribute produces a warning.
-- Duplicate attributes remain in source order and produce warnings rather than silently using first-wins or last-wins behavior.
-- Every directive applies the same value-typing rules. Known boolean values are matched case-insensitively and serialize as lowercase unquoted `true` or `false`.
-- Every non-boolean value is a double-quoted string, including empty and numeric-looking values such as `firstline="10"` or `borderWidth="1"`.
-- An invalid value for a known boolean attribute remains visible as a double-quoted string and produces a warning.
-- Attribute values use JSON-style escapes for double quote, backslash, newline, carriage return, and tab: `\"`, `\\`, `\n`, `\r`, and `\t`.
-- Attribute values never span physical source lines.
-- Bare attributes are reserved for explicitly defined presence-only flags such as image `thumbnail`; they are distinct from boolean-valued attributes.
-- Unknown escape sequences remain visible and produce warnings.
-- Inline directive content never spans a physical source line. `]` and backslash are escaped as `\]` and `\\`.
-- Each inline directive defines its content model: `:link[...]` parses supported inline JFM, while `:image[...]` contains plain alternative text only.
-- Content that violates its directive's content model remains visible and produces a warning.
-- `:::panel`, `:::code`, and `:image` can serialize unknown or duplicate attributes into Jira's parameter-bearing syntax. Those attributes retain the required order and produce warnings without making the complete directive literal.
-- `:link` and `:::table` have no Jira target location for extra attributes. An unknown or duplicate attribute makes the complete directive escaped Jira literal text and produces a warning.
-- A directive missing a required attribute, including `:link` without `target` or `:image` without `src`, is malformed; the complete directive becomes escaped Jira literal text and produces a warning.
+Inputs that produce warnings do not have a complete round-trip guarantee. Their canonicalized representable result MUST nevertheless stabilize after the lossy information has been removed.
 
-```markdown
-::::panel{title="Data"}
-:::table
-|A|1|
-|B|2|
-:::
-::::
-```
+## 4. Warnings
 
-## Unsupported notation
+Every lossy conversion and literal fallback occurrence MUST produce one or more warnings. Warnings are separate from converted text and MUST NOT be embedded in JFM or Jira Markup.
 
-- Unsupported source notation does not fail the complete conversion in either direction.
-- The unsupported source notation remains present in JFM, and the conversion reports a warning.
-- Unsupported notation is never silently dropped.
-- Unsupported macro delimiters remain in their original Jira form while recognized content in the macro body continues through best-effort conversion.
-- Warnings identify that the macro was not recognized and that its body was converted without knowledge of the macro's render mode.
-- The fallback does not wrap unsupported content in a separate raw directive.
-- Warnings are returned as structured data alongside JFM and are never embedded in the Markdown text.
-- Every warning records its source line, source column, construct, and reason.
-- `ConversionWarning.Construct` is an open, machine-stable vocabulary of lowercase kebab-case identifiers rather than free-form prose. The package provides exported constants for identifiers it emits, such as `link`, `image`, `code-block`, `reference-definition`, `directive`, and `jira-macro`.
-- New construct identifiers may be added without changing the field's `string` type. Callers must not treat the current identifier set as closed.
-- `ConversionWarning.Reason` is human-readable explanatory text and is not a machine-stable identifier.
-- `FromJFM` preserves unknown directives, custom HTML elements, malformed supported directives, and unsupported Markdown constructs as escaped literal Jira text with warnings while continuing the rest of the conversion.
-- Warnings remain in parser discovery order, which follows source occurrence order.
-- Multiple warnings at the same position retain discovery order; warnings are not sorted, merged, or deduplicated.
-- Every unsupported or malformed occurrence produces its own warning.
-- Warning line and column values are one-based.
-- Columns count Unicode code points rather than UTF-8 bytes.
-- LF, CRLF, and a bare CR each advance the line number once.
+A warning contains:
+
+- `Line`: one-based source line.
+- `Column`: one-based source column counted in Unicode code points.
+- `Construct`: a stable lowercase kebab-case identifier.
+- `Reason`: a human-readable explanation of the loss or fallback.
+
+`Construct` is an open vocabulary. New identifiers may be added without changing the warning shape. Defined identifiers include `blockquote`, `code-block`, `directive`, `escape`, `heading`, `html`, `image`, `jira-macro`, `link`, `list`, `reference-definition`, `table`, and `utf-8`. Consumers MUST NOT treat this set as closed. `Reason` is explanatory prose and is not a machine-stable identifier.
+
+Warnings remain in source occurrence order. Multiple warnings at the same position retain discovery order. Warnings are not merged or deduplicated, and every unsupported or malformed occurrence produces its own warning.
+
+Position rules are:
+
+- LF, CRLF, and bare CR each advance the line number once.
 - A construct-level warning points to the first source character of the construct.
-- An attribute-level warning points to the first character of the attribute name.
-- An escape warning points to the backslash that triggers the problem.
-- A reference-definition warning points to its opening `[`, and a macro warning points to its opening `{`.
-- Warnings expose only this start location; the first-version API does not include an end position.
+- An attribute warning points to the first character of the attribute name.
+- An escape warning points to the triggering backslash.
+- A reference-definition warning points to its opening `[`.
+- A Jira macro warning points to its opening `{`.
+- This version records only a start position, not an end position.
 
-```go
-type JFMResult struct {
-	Markdown string
-	Warnings []ConversionWarning
-}
+Invalid UTF-8 bytes are replaced individually with U+FFFD. Each replacement produces a warning at the invalid byte's source position. Successful conversion always produces valid UTF-8.
 
-type JiraMarkupResult struct {
-	Markup   string
-	Warnings []ConversionWarning
-}
+## 5. Escaping and text
 
-type ConversionWarning struct {
-	Line      int
-	Column    int
-	Construct string
-	Reason    string
-}
-```
+Escaping is interpreted in the source notation before target escaping is applied. Decoded source delimiters MUST NOT become unintended target formatting.
 
-## Library API
+- Jira backslash escapes decode Jira delimiters; doubled backslashes decode to one literal backslash.
+- A Jira backslash before a non-delimiter remains literal, including Windows paths such as `C:\temp`.
+- An escape that truncates or prevents closure of a recognized construct produces a warning; an otherwise unnecessary escape does not.
+- Valid CommonMark named and numeric character references decode to their Unicode characters.
+- Invalid character references remain visible text without a warning.
+- Plain-text characters that would start Jira formatting or a Jira line control sequence are escaped in Jira output.
+- Plain-text characters that would start unintended Markdown formatting are escaped in JFM output.
+- Directive attribute escapes are interpreted only inside directive attributes. Unknown escape sequences remain visible and produce warnings.
 
-```go
-func ToJFM(ctx context.Context, jiraMarkup string) (JFMResult, error)
-func FromJFM(ctx context.Context, jfm string) (JiraMarkupResult, error)
-```
+## 6. Headings and breaks
 
-- The first-version Go API remains in `internal/markup`; it is available to jiro commands and repository tests but is not a public Go module compatibility promise.
-- The JFM text-format contract is stable independently of the Go package's internal visibility.
-- The existing Markdown Input `ToJira` API remains unchanged.
-- Both JFM conversion directions use best-effort conversion and return structured warnings separately from their text result.
-- Both new conversion APIs honor context cancellation during parsing and serialization.
-- Given the same input and a context that is not cancelled, each conversion returns byte-for-byte identical text and warnings in the same order.
-- `ToJFM` and `FromJFM` are safe for concurrent calls and do not depend on mutable package-global state.
-- Conversion does not read Jira profiles, locale settings, network state, or external configuration. Context cancellation is the only external state that may affect completion.
+Jira `h1.` through `h6.` correspond to Markdown ATX headings `#` through `######`. JFM accepts CommonMark ATX and setext headings and emits canonical ATX headings. ATX input may use up to three leading spaces and an optional closing hash sequence. Canonical output begins at column one, has no closing hashes, and uses one space after a non-empty marker. An empty heading has no trailing space. `h0.`, `h7.`, and malformed Jira heading-like input remain visible and produce warnings.
 
-## Internal architecture
+Jira `----` corresponds to canonical JFM `---`. Any CommonMark thematic-break spelling converts to Jira `----`.
 
-- `FromJFM` continues to use Goldmark for CommonMark parsing, with jiro-owned extensions for JFM directives and controlled syntax.
-- `ToJFM` uses a purpose-built Jira Markup parser because Jira macros, marker-chain lists, escaping, and fallback boundaries are not CommonMark grammar.
-- Both parsers adapt into a thin normalized semantic model that carries source spans. Target serializers consume that model to share construct, canonicalization, attribute, and warning rules.
-- Goldmark's AST is not forced to serve as the Jira parser's interchange model; fabricating CommonMark source segments for Jira notation would make locations, escaping, and unsupported-notation preservation fragile.
-- The existing Markdown Input `ToJira` parser and renderer remain unchanged.
+Jira `\\` corresponds to a Markdown hard break. JFM accepts both backslash hard breaks and two-or-more-trailing-space hard breaks and emits the backslash form canonically. Text preceding a hard-break marker MUST be retained.
 
-## Errors
+<!-- jfm-spec-example: heading; direction: jira-to-jfm -->
+Input:
+~~~jira
+h2. Release
+~~~
 
-- Unknown, unsupported, or malformed source notation is preserved and reported through structured warnings rather than a fatal error in both directions.
-- The converter does not impose a fixed input-size limit.
-- The contract does not currently define a nesting-depth limit.
-- Fatal errors are limited to context cancellation, output failures, and internal invariant failures.
-- Cancellation and deadline failures preserve `errors.Is(err, context.Canceled)` and `errors.Is(err, context.DeadlineExceeded)` respectively.
-- Internal invariant and other conversion-engine failures wrap the exported sentinel `ErrConversion` so callers can use `errors.Is` without depending on error text.
-- Source-content problems never wrap `ErrConversion` and never become fatal errors; they remain result text plus structured warnings.
-- A fatal error returns the zero value of the direction-specific result type and never exposes partial converted text or warnings.
+Output:
+~~~jfm
+## Release
+~~~
 
-## Initial supported scope
+Warnings:
+~~~json
+[]
+~~~
 
-- Every canonical Jira construct emitted by the existing Markdown Input converter.
-- ATX headings H1 through H6.
-- Bold, italic, combined bold and italic, and strikethrough text.
-- Inserted, superscript, subscript, and colored text.
-- Ordered, unordered, and nested lists.
-- Named and unnamed links.
-- Images.
-- Inline monospaced text.
-- Typed and untyped preformatted blocks.
-- Forced line breaks and thematic breaks.
-- Single-paragraph blockquotes.
-- Tables.
-- Jira panels.
+## 7. Inline formatting
 
-Every canonical Jira Markup value produced by the existing Markdown Input converter must convert to JFM without warnings and return to semantically equivalent canonical Jira Markup.
+The canonical mappings are:
 
-## Headings
-
-- Jira line-start headings `h1.` through `h6.` render as Markdown ATX headings `#` through `######`.
-- `FromJFM` accepts CommonMark setext H1 and H2 headings in addition to ATX input.
-- `FromJFM` accepts CommonMark ATX headings with up to three leading spaces and an optional closing hash sequence without warnings.
-- Canonical JFM always serializes headings in ATX form.
-- `ToJFM` starts the ATX marker at the beginning of the line and never emits closing hashes.
-- A non-empty Markdown heading uses exactly one space after its marker.
-- An empty Jira heading such as `h3.` renders as `###`.
-- JFM serializes headings back as canonical `hN. Title` or `hN.` for an empty heading.
-- `h0.`, `h7.`, and malformed heading-like text remain visible and produce a warning.
-
-## Canonical inline formatting
-
-- Jira `*bold*` renders as Markdown `**bold**`.
-- Jira `_italic_` renders as Markdown `*italic*`.
-- Jira `-strikethrough-` renders as Markdown `~~strikethrough~~`.
-- A span that is both bold and italic renders as Markdown `***bold and italic***`.
-- `FromJFM` accepts CommonMark emphasis delimited by either `*` or `_`, and strong emphasis delimited by either `**` or `__`, without warnings.
-- `ToJFM` always serializes italic as `*...*`, bold as `**...**`, and a single span carrying both marks as `***...***`.
-- Distinct nested spans preserve their source nesting rather than being merged solely because their delimiters touch.
-- Jira text-effect delimiters must form complete spans; ordinary hyphenated text such as `release-note` remains literal text.
-
-## Lists
-
-- `FromJFM` accepts CommonMark unordered-list markers `-`, `*`, and `+` without warnings; `ToJFM` always serializes them as canonical `-` markers.
-- Ordered list items use `1.` markers because Jira does not retain authored ordinal values.
-- `FromJFM` accepts CommonMark ordered-list markers ending in either `.` or `)`.
-- An ordered list starting at `1` converts without a warning. Any other start value still converts structurally but produces a warning at the list marker because Jira cannot retain the authored start number.
-- `ToJFM` always serializes ordered items with `1.` regardless of their position.
-- Each nested level uses four spaces of indentation.
-- Mixed Jira marker chains preserve the ordered or unordered type at every level.
-- A reversible list item contains one inline paragraph followed by optional nested lists.
-- Additional paragraphs, fenced code, blockquotes, tables, panels, and other block children inside an item are not structurally converted; their source remains visible and produces a warning.
-- A list item whose nesting level has no parent is not flattened and does not cause synthetic empty parents. Its Jira source line remains visible and produces a warning.
-- A top-level change between unordered and ordered list types starts a new Markdown block separated by one blank line.
-
-```text
-* parent
-*# ordered child
-*#* unordered grandchild
-```
-
-renders as:
-
-```markdown
-- parent
-    1. ordered child
-        - unordered grandchild
-```
-
-## Links
-
-- An unnamed absolute URL uses a Markdown URI autolink: `[https://example.com]` renders as `<https://example.com>`.
-- An unnamed `mailto:` destination uses a Markdown email autolink: `[mailto:user@example.com]` renders as `<user@example.com>`.
-- An unnamed document anchor renders with its target as its label: `[#section]` renders as `[#section](#section)`.
-- A named self-contained destination uses an ordinary Markdown link: `[Docs|https://example.com]` renders as `[Docs](https://example.com)` and `[Jump|#section]` renders as `[Jump](#section)`.
-- Jira links have no separate title semantic. A Markdown link with an optional title is preserved as escaped Jira literal text and produces a warning; the converter does not silently discard the title or present the link as fully supported.
-- `FromJFM` accepts resolved full, collapsed, and shortcut reference-style links and converts them with the same Jira destination rules as inline links.
-- `ToJFM` always serializes those links inline or as `:link`; it never creates Markdown link reference definitions.
-- A valid reference definition used by at least one link or image is consumed during `FromJFM`; the definition line itself produces neither Jira output nor a warning.
-- An unused valid reference definition, or a duplicate definition shadowed by an earlier definition with the same normalized label, is preserved as escaped Jira literal text and produces a warning rather than being silently dropped.
-- An unresolved reference is ordinary visible CommonMark text and converts as text without a warning.
-- Jira-context-dependent link targets use the inline directive syntax `:link[content]{target="..."}`.
-- The `content` is the displayed label. The required `target` attribute contains the complete Jira target, including prefixes such as `^` for attachments and `~` for users.
-- The link directive's canonical attribute order is `target`.
-- `target` is required and may occur only once; violations use the malformed-directive fallback.
-- The target is always present and double-quoted, even when it is identical to the displayed content.
-- Jira link directives are supported reversible constructs and do not produce warnings.
-- Destinations using `javascript:`, `vbscript:`, or `data:` never render as ordinary Markdown links. They use `:link`, remain reversible, and produce warnings in both directions.
-- Dangerous-scheme matching is case-insensitive and occurs after decoding source escaping and ignoring obfuscating leading whitespace or control characters.
-
-```markdown
-:link[PROJ-123]{target="PROJ-123"}
-:link[Issue]{target="PROJ-123"}
-:link[attachment.zip]{target="^attachment.zip"}
-:link[username]{target="~username"}
-```
-
-## Images
-
-- A Jira image containing only a destination and optional `alt` attribute renders as a standard Markdown image.
-- `!https://example.com/a.png|alt=architecture!` renders as `![architecture](https://example.com/a.png)`.
-- `!images/a.png!` renders as `![](images/a.png)`.
-- Jira escaping is decoded and then serialized for the Markdown destination and alternative-text contexts independently.
-- A Markdown image title is supported by `FromJFM` and maps to the Jira image `title` attribute.
-- Because Jira image titles are additional attributes, `ToJFM` serializes an image with a title as `:image` rather than as standard Markdown image syntax.
-- The existing Markdown Input converter's title-discarding behavior remains unchanged and is not part of JFM conversion.
-- `FromJFM` accepts resolved reference-style images and converts them with the same Jira destination and alternative-text rules as inline images.
-- `ToJFM` always serializes those images inline or as `:image`; it never creates Markdown image reference definitions.
-- A Jira image with any additional supported attribute renders as an `:image[alt]{attributes}` inline directive.
-- The image directive requires a double-quoted `src` attribute. Its content stores the alternative text.
-- `src` is required and may occur only once; a missing or duplicate `src` uses the malformed-directive fallback.
-- Supported Jira image attributes are `thumbnail`, `align`, `border`, `bordercolor`, `hspace`, `vspace`, `width`, `height`, and `title`; their names remain unchanged.
-- The image directive's canonical attribute order is `src`, `thumbnail`, `align`, `border`, `bordercolor`, `hspace`, `vspace`, `width`, `height`, `title`.
-- The presence-only `thumbnail` flag is emitted without a value.
-- A supported image directive is reversible and does not produce a warning.
-- Image destinations using `javascript:`, `vbscript:`, or `data:` always use `:image` rather than standard Markdown image syntax and produce warnings in both directions.
-
-```markdown
-:image[Fish]{src="fish.gif" thumbnail align="right" width="320" title="Preview"}
-```
-
-## Controlled inline HTML
-
-- Jira `+inserted+` renders as `<ins>inserted</ins>`.
-- Jira `^superscript^` renders as `<sup>superscript</sup>`.
-- Jira `~subscript~` renders as `<sub>subscript</sub>`.
-- Jira `{color:red}red text!{color}` renders as `<font color="red">red text!</font>`.
-- A non-empty color value is preserved without a whitelist and HTML-attribute escaped before serialization.
-- An empty or malformed color macro remains in its original Jira form and produces a warning.
-- Supported Jira formatting inside these spans continues through JFM conversion.
-- Nested Jira constructs retain their source nesting order. The converter does not reorder controlled HTML and Markdown delimiters.
-- Controlled tag and attribute names are accepted case-insensitively, but canonical JFM output always uses lowercase tag names and lowercase `color`.
-- `FromJFM` accepts the controlled `font` color value in valid unquoted, single-quoted, or double-quoted HTML attribute form; `ToJFM` always emits a double-quoted value.
-- `<ins>`, `<sup>`, and `<sub>` accept no attributes. `<font>` accepts exactly one `color` attribute.
-- Self-closing, mismatched, or unclosed controlled tags, attributes on `<ins>`, `<sup>`, or `<sub>`, and extra or duplicate `<font>` attributes make the complete HTML span escaped Jira literal text and produce a warning rather than being repaired or partially converted.
-
-## Tables
-
-- A Jira table with exactly one leading header row and body rows renders as a canonical GFM pipe table.
-- A GFM table cell may contain only text, bold, italic, strikethrough, inline code, and standard Markdown links.
-- If any cell contains an image, hard break, controlled HTML, directive, block content, or other Jira-only notation, the complete table uses the reversible `:::table` form instead.
-- Table fallback applies to the whole table; GFM cells and raw Jira cells are never mixed in one table.
-- Every cell delimiter has one surrounding space in JFM.
-- Literal pipes and backslashes use Markdown table-cell-context escaping.
-- Significant Jira cell leading or trailing whitespace triggers whole-table `:::table` fallback because GFM trims cell-edge whitespace.
-- Code-span internal whitespace is never trimmed by table serialization.
-- The GFM separator row uses `---` for every column.
-- A GFM table without alignment metadata converts to Jira without a warning.
-- If a GFM separator row contains left, right, or center alignment markers, `FromJFM` still converts the table content but produces one warning at the separator row because Jira cannot retain the alignment semantics.
-- `ToJFM` does not infer alignment and always emits `---` for every separator cell.
-- Jira table shapes that GFM cannot represent use the supported `:::table` container directive.
-- A `:::table` body contains canonical Jira table rows and is not interpreted as Markdown.
-- The table directive defines no attributes.
-- Any attribute on `:::table` uses the malformed-directive fallback because Jira table rows have no parameter syntax.
-- The table directive is reversible and does not produce a warning.
-
-```jira
-||Name||Value||
-|Alpha|1|
-|Beta|2|
-```
-
-renders as:
-
-```markdown
-| Name | Value |
+| Jira Markup | JFM |
 | --- | --- |
-| Alpha | 1 |
-| Beta | 2 |
-```
+| `*bold*` | `**bold**` |
+| `_italic_` | `*italic*` |
+| `-strike-` | `~~strike~~` |
+| `+inserted+` | `<ins>inserted</ins>` |
+| `^superscript^` | `<sup>superscript</sup>` |
+| `~subscript~` | `<sub>subscript</sub>` |
+| `{color:red}text{color}` | `<font color="red">text</font>` |
+| `{{code}}` | `` `code` `` |
 
-A headerless Jira table uses the directive form:
+Formatting nesting follows source nesting order. Controlled tags are case-insensitive on input and lowercase in canonical JFM. `<ins>`, `<sup>`, and `<sub>` accept no attributes. `<font>` accepts exactly one `color` attribute. Malformed, unclosed, mismatched, or attribute-bearing controlled HTML uses literal fallback.
 
-```markdown
+JFM accepts `*` or `_` for emphasis and `**` or `__` for strong emphasis. Canonical output uses the spellings in the table above. A single span carrying both bold and italic uses `***...***`; distinct nested spans remain distinct and are not merged merely because delimiters touch. Jira effect delimiters must form a complete span, so ordinary hyphenated text such as `release-note` remains text.
+
+Inline code uses a delimiter one backtick longer than the longest backtick run in its body, with a minimum length of one. Only CommonMark-required padding spaces may be added. Literal body content is otherwise preserved. Jira delimiter-protection U+200B characters are removed only when they match the canonical inline-code safety patterns; unrelated U+200B characters remain content.
+
+<!-- jfm-spec-example: inline-formatting; direction: jfm-to-jira -->
+Input:
+~~~jfm
+**bold** *italic* ~~old~~ <ins>new</ins>
+~~~
+
+Output:
+~~~jira
+*bold* _italic_ -old- +new+
+~~~
+
+Warnings:
+~~~json
+[]
+~~~
+
+## 8. Lists and block quotes
+
+JFM accepts CommonMark unordered markers `-`, `*`, and `+` and ordered markers ending in `.` or `)`. Jira marker chains preserve the ordered or unordered type at every nesting level. Canonical JFM uses `-` and `1.` regardless of authored marker or ordinal. Authored ordered-list start values other than one are discarded with a warning because Jira Markup cannot retain them.
+
+A list item with one inline paragraph followed by nested lists is reversible. When an item contains additional recognized blocks that Jira list markers cannot own, the first paragraph remains the list item and the remaining blocks are emitted as independent blocks at the nearest safely representable level, preserving source order. Any nested-list tail after the interruption is flattened to a valid top-level list rather than emitted with orphan Jira markers. The lost containment produces a warning. Formatting inside every emitted block is retained.
+
+A hard break inside a list item cannot retain both the physical break and Jira marker ownership. The content before the break remains in the item; subsequent content is lifted to an independent paragraph and the loss of containment produces the same list warning.
+
+A Jira list marker whose nesting level has no authored parent remains visible and produces a warning; a converter MUST NOT fabricate empty parent items. A top-level change between ordered and unordered markers starts a new canonical block.
+
+JFM block quotes map to Jira `{quote}` containers. Jira `bq.` and `{quote}` are both accepted; canonical Jira output uses `{quote}`. CommonMark lazy-continuation forms are accepted. Paragraphs, lists, headings, tables, code blocks, panels, and nested quotes are supported inside a quote. Every quoted line in canonical JFM begins with `> `, while blank quoted lines contain only `>`.
+
+Structured quote nesting is limited to 64 levels. A deeper quote remains visible as literal content and produces a warning rather than causing a fatal conversion failure. Adjacent nested Jira `{quote}` close/open delimiters without a blank separator are syntactically ambiguous because opening and closing markers are identical; the containing quote therefore uses literal fallback with a warning.
+
+<!-- jfm-spec-example: ordered-start-loss; direction: jfm-to-jira -->
+Input:
+~~~jfm
+7. seven
+~~~
+
+Output:
+~~~jira
+# seven
+~~~
+
+Warnings:
+~~~json
+[
+  {"Line":1,"Column":1,"Construct":"list","Reason":"Jira Markup cannot retain an ordered list start other than 1"}
+]
+~~~
+
+<!-- jfm-spec-example: complex-blockquote; direction: jfm-to-jira -->
+Input:
+~~~jfm
+> first
+>
+> - one
+> - two **bold**
+~~~
+
+Output:
+~~~jira
+{quote}
+first
+
+* one
+* two *bold*
+{quote}
+~~~
+
+Warnings:
+~~~json
+[]
+~~~
+
+## 9. Links and images
+
+Ordinary Markdown links map to Jira `[label|target]`. An unnamed absolute URL uses `<https://example.com>` in canonical JFM; an unnamed `mailto:` target uses an email autolink. An unnamed document anchor uses `[#section](#section)`. Jira-only targets such as issue keys, attachments, and users use `:link[content]{target="..."}` when ordinary Markdown cannot represent the target safely.
+
+The `:link` directive requires exactly one quoted `target` attribute and accepts supported inline JFM in its content. It has no location for extra Jira parameters, so unknown or duplicate attributes make the complete directive malformed and invoke literal fallback.
+
+Jira Markup has no link-title semantic. A Markdown link title is therefore discarded, while the label, target, and label formatting are converted normally. This is a lossy conversion and produces a warning.
+
+Jira link labels cannot contain a physical hard break. A hard break inside a Markdown link label becomes one space, the link remains structural, and a warning records the discarded break semantic.
+
+Standard Markdown images map to Jira image notation. Alternative text maps to Jira `alt`. Markdown image titles map to Jira `title` and are reversible. An image with only source and optional alternative text uses standard Markdown syntax in canonical JFM; an image title or any additional Jira attribute uses `:image[alt]{src="..." ...}`. Canonical image attribute order is `src`, `thumbnail`, `align`, `border`, `bordercolor`, `hspace`, `vspace`, `width`, `height`, `title`.
+
+The `:image` directive requires exactly one quoted `src` attribute. `thumbnail` is presence-only; all other attributes require values. Unknown and duplicate attributes remain representable in Jira image parameter syntax, retain their source order after known attributes, and produce warnings.
+
+Reference-style links and images are accepted as full, collapsed, or shortcut input and emitted canonically as inline syntax or directives. Used definitions are consumed. Unused or shadowed definitions remain literal and produce warnings. Unresolved references are ordinary visible CommonMark text and do not produce warnings.
+
+Destinations using `javascript:`, `vbscript:`, or `data:` never become clickable Markdown links or images. Their target remains reversible through directives or Jira notation and produces a warning.
+
+<!-- jfm-spec-example: link-title-loss; direction: jfm-to-jira -->
+Input:
+~~~jfm
+[Title](https://example.com "Read")
+~~~
+
+Output:
+~~~jira
+[Title|https://example.com]
+~~~
+
+Warnings:
+~~~json
+[
+  {"Line":1,"Column":1,"Construct":"link","Reason":"Markdown link title was discarded because Jira Markup has no equivalent"}
+]
+~~~
+
+<!-- jfm-spec-example: image-title; direction: jfm-to-jira -->
+Input:
+~~~jfm
+![Diagram](diagram.png "Preview")
+~~~
+
+Output:
+~~~jira
+!diagram.png|alt=Diagram,title=Preview!
+~~~
+
+Warnings:
+~~~json
+[]
+~~~
+
+## 10. Tables
+
+JFM accepts GFM pipe tables. Jira header cells use `||`; body cells use `|`. Table alignment is discarded with a warning because Jira Markup cannot retain it.
+
+JFM-to-Jira conversion accepts representable inline content in a parsed GFM cell, including standard images. Such content MUST be converted rather than causing the table to become literal.
+
+Canonical Jira-to-JFM conversion uses a GFM table only when every cell contains text, bold, italic, strikethrough, inline code, or standard Markdown links. Images, hard breaks, controlled HTML, directives, significant cell-edge whitespace, headerless tables, inconsistent row shapes, and other Jira-only cell semantics use the reversible `:::table` container instead. A GFM table cannot contain a physical-line-spanning hard break because the line ending terminates the row.
+
+The `:::table` body contains canonical Jira table rows and is not parsed as Markdown. `:::table` accepts no attributes. Selecting this directive is canonicalization, not literal fallback, and does not produce a warning.
+
+<!-- jfm-spec-example: table-image; direction: jfm-to-jira -->
+Input:
+~~~jfm
+| A |
+| --- |
+| ![x](x.png) |
+~~~
+
+Output:
+~~~jira
+||A||
+|!x.png|alt=x!|
+~~~
+
+Warnings:
+~~~json
+[]
+~~~
+
+<!-- jfm-spec-example: table-image-canonical-form; direction: jira-to-jfm -->
+Input:
+~~~jira
+||A||
+|!x.png|alt=x!|
+~~~
+
+Output:
+~~~jfm
 :::table
-|Alpha|1|
-|Beta|2|
+||A||
+|!x.png|alt=x!|
 :::
+~~~
+
+Warnings:
+~~~json
+[]
+~~~
+
+## 11. Code and preformatted text
+
+Jira `{{...}}` maps to inline code. Jira `{noformat}` maps to a fenced code block with an empty info string. An untyped Jira `{code}` maps canonically to an attribute-free `:::code` directive, while a Jira `{code}` carrying only a language maps to a language fence. Indented CommonMark code blocks map to Jira `{noformat}`. Fenced code blocks with a language map to Jira `{code}`.
+
+A fenced code info string has these JFM semantics:
+
+- An empty info string produces `{noformat}`. This preserves the distinction between Jira noformat and Jira code blocks without adding another JFM directive.
+- The first token is a language when it contains no `=` character.
+- Language matching is case-insensitive for aliases: `js`, `jsx`, and `mjs` canonicalize to `javascript`; `sh`, `shell`, and `zsh` canonicalize to `bash`.
+- Other single-token languages are retained.
+- Every token after the language is unsupported metadata. It is discarded and produces one warning for the code block.
+- If the first token contains `=`, the block has no language; all info-string content is discarded with a warning and the result is untyped `{code}`.
+- Code-body bytes and internal line endings are preserved.
+- JFM accepts backtick and tilde fences of any valid CommonMark length. Canonical JFM uses a backtick fence one character longer than the longest backtick run in the body, with a minimum length of three.
+- Code bodies are literal. Jira formatting notation and JFM directives inside a code body are never interpreted.
+
+Jira code parameters are represented only by `:::code{attributes}`. Recognized attribute order is `language`, `title`, `theme`, `linenumbers`, `firstline`, `collapse`, `borderStyle`, `borderColor`, `borderWidth`, `bgColor`, `titleBGColor`, `titleColor`. `collapse` and `linenumbers` are boolean values. Other values are quoted strings.
+
+The `:::code` directive may omit its attribute list to represent untyped Jira `{code}`. Its fence follows the general safe-container rule: its colon run is longer than any standalone colon-fence line in the literal code body. Code length never creates an implicit `collapse=true`; collapse is enabled only by an explicit directive attribute.
+
+<!-- jfm-spec-example: fenced-code-metadata-loss; direction: jfm-to-jira -->
+Input:
+~~~jfm
+```JavaScript title=
+code
 ```
+~~~
 
-## Blockquotes
+Output:
+~~~jira
+{code:language=javascript}
+code
+{code}
+~~~
 
-- Jira `bq. one paragraph` and the `{quote}...{quote}` macro both render as Markdown blockquotes.
-- A quote macro may contain multiple paragraphs.
-- `FromJFM` accepts CommonMark lazy-continuation blockquotes and other valid forms that omit repeated markers without warnings.
-- `ToJFM` never emits a lazy form: every non-empty quoted line begins with `> `, and a paragraph separator inside the quote is a line containing only `>`.
-- Quote paragraphs may contain supported inline formatting, links, and controlled inline HTML.
-- Lists, code blocks, tables, panels, nested quotes, and other non-paragraph children inside a quote are not structurally converted in the first version; their Jira syntax remains visible and produces a warning.
-- JFM converts both Jira source forms back to the canonical `{quote}` macro form.
+Warnings:
+~~~json
+[
+  {"Line":1,"Column":1,"Construct":"code-block","Reason":"fenced code info string metadata was discarded"}
+]
+~~~
 
-## Breaks
-
-- Jira's `\\` forced-line-break notation renders as a Markdown backslash hard break.
-- `FromJFM` accepts both a backslash hard break and the CommonMark form using two or more trailing spaces, serializing either as canonical Jira `\\` followed by a source newline.
-- `ToJFM` always emits the visible backslash hard-break form and never emits trailing-space hard breaks.
-- Jira `----` thematic breaks render as Markdown `---`.
-- `FromJFM` accepts every thematic-break spelling recognized by the configured CommonMark parser, including valid `---`, `***`, `___`, and spaced forms, and serializes them as canonical Jira `----`.
-- `ToJFM` always emits canonical `---`.
-
-## Code and preformatted text
-
-- Jira `{{monospaced}}` renders as a Markdown code span.
-- Jira `{noformat}...{noformat}` renders as a fenced code block without a language.
-- A Jira `{code}` macro with only an optional language renders as a fenced code block with the corresponding language.
-- A Jira `{code}` macro with parameters beyond its language renders as a supported `:::code{attributes}` container directive.
-- `FromJFM` accepts backtick and tilde code fences of any valid CommonMark length of at least three.
-- `FromJFM` accepts a CommonMark four-space indented code block as an untyped preformatted block and converts it to Jira `{noformat}` without a warning.
-- `ToJFM` never emits indented code blocks; it always uses fenced form. An indented code block inside a list item remains subject to the unsupported complex-list-item rule.
-- A standard fenced code block supports an empty info string or exactly one language token. An info string containing additional tokens or metadata makes the complete block unsupported: it remains visible as escaped Jira literal text and produces a warning; parameterized code must use `:::code`.
-- Code directive attribute names remain the Jira names. `collapse` and `linenumbers` are boolean-valued; the other code attributes are strings under the common directive typing rules.
-- The recognized code directive attributes use this canonical order: `language`, `title`, `theme`, `linenumbers`, `firstline`, `collapse`, `borderStyle`, `borderColor`, `borderWidth`, `bgColor`, `titleBGColor`, `titleColor`.
-- Unknown code directive attributes remain after the recognized attributes in their original relative order and produce a warning.
-- Code languages are matched case-insensitively for the existing aliases: `js`, `jsx`, and `mjs` normalize to `javascript`; `sh`, `shell`, and `zsh` normalize to `bash`.
-- Other single-token language values pass through unchanged without warnings.
-- A language value that cannot be represented safely in a fence info string uses the quoted `language` attribute of `:::code`.
-- `FromJFM` never adds `collapse=true` based on code-block length. Only an explicit `collapse=true` code directive attribute enables Jira collapse behavior.
-- The existing Markdown Input converter's line-count-based collapse behavior remains unchanged and is not part of JFM conversion.
-- The body of `{noformat}` and `{code}` is literal text. Jira formatting notation inside it is never interpreted.
-- Inline code uses a backtick delimiter one character longer than the longest backtick run in its body, with a minimum length of one.
-- `ToJFM` always uses a backtick fence one character longer than the longest backtick run in its body, with a minimum length of three.
-- Inline code adds only the padding spaces required by CommonMark code-span rules; literal body content is otherwise unchanged.
-- `ToJFM` removes U+200B only when it matches jiro's canonical inline-code delimiter-safety patterns: after a trailing backslash or between a backslash and an escaped Jira delimiter.
-- U+200B in any other inline-code position remains literal content.
-- `FromJFM` reuses the existing Jira inline-code escaping rules and inserts U+200B only where required to protect closing or escaped delimiters.
-
-```markdown
+<!-- jfm-spec-example: parameterized-code; direction: jfm-to-jira -->
+Input:
+~~~jfm
 :::code{language="javascript" title="Example" collapse=true}
 const x = 1
 :::
-```
+~~~
 
-## Panels
+Output:
+~~~jira
+{code:language=javascript|title=Example|collapse=true}
+const x = 1
+{code}
+~~~
 
-- Jira `{panel}` macros render as a jiro-owned `:::panel{...}` container directive.
-- The directive preserves the panel body and Jira attributes instead of degrading the panel into a blockquote or table.
-- A panel body recursively supports every JFM block and inline construct, including headings, lists, code, tables, blockquotes, images, links, controlled HTML, and nested panels.
-- Nested container directives use the variable-length colon-fence rules.
-- Attribute names remain the original Jira names: `title`, `borderStyle`, `borderColor`, `borderWidth`, `bgColor`, `titleBGColor`, and `titleColor`.
-- The panel directive's canonical attribute order is `title`, `borderStyle`, `borderColor`, `borderWidth`, `bgColor`, `titleBGColor`, `titleColor`.
-- The directive does not use the unrelated ADF `panelType` model.
+Warnings:
+~~~json
+[]
+~~~
 
-```markdown
-:::panel{title="Warning" borderStyle="dashed" borderColor="#DE350B" bgColor="#FFEBE6"}
-Panel content with **Markdown**.
+<!-- jfm-spec-example: untyped-code-canonical-form; direction: jira-to-jfm -->
+Input:
+~~~jira
+{code}
+plain
+{code}
+~~~
+
+Output:
+~~~jfm
+:::code
+plain
 :::
-```
+~~~
 
-## Verification
+Warnings:
+~~~json
+[]
+~~~
 
-- Exact-output tests compare the complete JFM result and the complete structured warning set.
-- New exact-output cases use the repository's `txtar` golden convention in both directions, including an explicit `warnings.json` section when the expected list is empty.
-- Warning-free supported Jira satisfies `Jira -> JFM -> Jira == canonical Jira`.
-- Warning-free supported JFM satisfies `JFM -> Jira -> JFM == canonical JFM`.
-- Input-only spellings such as reference-style links, alternate list markers, tilde code fences, and other accepted CommonMark variants need not retain their source spelling; they must retain supported semantics and normalize to canonical JFM.
-- Inputs that produce warnings are not covered by a complete round-trip guarantee; they remain covered by the construct-specific preservation and best-effort rules.
-- Fuzz tests exercise arbitrary byte strings in both directions and require no panic, no unbounded hang, and valid UTF-8 on successful completion.
-- Race and concurrency tests verify deterministic concurrent calls, and cancellation tests verify the context error contract.
-- The first-version verification scope contains no live Jira or network end-to-end test because both APIs are pure string conversions.
+## 12. Directive syntax
 
-## Delivery boundary
+Inline directives have the form `:name[content]{attributes}`. Container directives use a colon fence, a name, optional attributes, a body, and a closing fence of equal length. A container fence contains at least three colons and MUST be longer than any nested colon fence in its body.
 
-- The first version is delivered and accepted as one complete bidirectional feature, even if its implementation is split into internal stages or commits.
-- A single completed direction is not separately integrated or described as supported.
-- Acceptance requires both internal APIs, structured warnings, supported JFM directives, `txtar` exact-output fixtures, round-trip properties, fuzz coverage, concurrency and race coverage, and cancellation tests.
-- The existing Markdown Input `ToJira` behavior remains unchanged throughout delivery.
+Directive and attribute rules are:
+
+- Directive names match `[A-Za-z][A-Za-z0-9-]*`.
+- Attribute names match `[A-Za-z][A-Za-z0-9_-]*`.
+- JFM does not support `.class` or `#id` shorthand.
+- Names are case-insensitive on input and use canonical case on output.
+- Input permits spaces or tabs between attributes and around `=`, but an attribute list never spans a physical line.
+- Inline directives permit no whitespace between the name, content brackets, and attribute braces.
+- Container opening fences permit only whitespace after their optional attribute list.
+- Canonical attributes use one ASCII space between attributes and no whitespace around `=`.
+- String values are double-quoted and use JSON-style escapes for quote, backslash, newline, carriage return, and tab.
+- Boolean values are lowercase unquoted `true` or `false`.
+- Presence-only flags, such as image `thumbnail`, have no value.
+- Known attributes use directive-defined canonical order.
+- Unknown known-directive attributes follow known attributes and retain their relative source order.
+- Duplicate attributes retain source order rather than using first-wins or last-wins behavior.
+- Unknown and duplicate attributes are retained only when Jira has a parameter location that can represent them; each produces a warning.
+- A missing required attribute or an unsafe identifier makes the complete directive malformed and invokes literal fallback.
+- A Jira parameter name that cannot be represented by the attribute-name grammar leaves the complete Jira construct visible and produces a warning; it is never renamed.
+- Known boolean values are case-insensitive on input and lowercase canonically. An invalid boolean remains a quoted visible value and produces a warning.
+- Every non-boolean value is a quoted string, including empty and numeric-looking values.
+- Attribute values never span source lines. Unknown escape sequences remain visible and produce warnings.
+- Inline directive content never spans a physical line. `]` and backslash are escaped as `\]` and `\\`.
+- `:link` content is inline JFM; `:image` content is plain alternative text. A content-model violation invokes literal fallback with a warning.
+
+The defined directives are `:link`, `:image`, `:::code`, `:::table`, and `:::panel`.
+
+## 13. Panels
+
+Jira `{panel}` maps to `:::panel`. A panel recursively contains every JFM block and inline construct, including nested panels. Canonical panel attribute order is `title`, `borderStyle`, `borderColor`, `borderWidth`, `bgColor`, `titleBGColor`, `titleColor`.
+
+Nested container directives use the shortest safe colon-fence length. Panel attributes retain Jira names and do not use unrelated panel type vocabularies.
+
+<!-- jfm-spec-example: panel; direction: jira-to-jfm -->
+Input:
+~~~jira
+{panel:title=Data}
+h1. Report
+{panel}
+~~~
+
+Output:
+~~~jfm
+:::panel{title="Data"}
+# Report
+:::
+~~~
+
+Warnings:
+~~~json
+[]
+~~~
+
+## 14. Unsupported and malformed input
+
+Unknown Jira macros retain their opening and closing notation while recognized body content continues through conversion. A warning identifies the unknown macro and the fact that its render mode is unknown.
+
+Unknown JFM directives and malformed supported directives use literal fallback because their semantic boundary or required data is not trustworthy. Unsupported or malformed controlled HTML likewise remains literal. Literal fallback escapes target control characters so the preserved source remains visible rather than becoming accidental formatting.
+
+Source-content problems are never fatal. A conforming conversion produces the best complete result it can, with warnings identifying every loss or fallback occurrence.

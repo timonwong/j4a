@@ -1,9 +1,10 @@
 -- input.md --
-| A |
-| --- |
-| ![x](x.png) |
+:::code
+plain
+:::
 -- want.jira --
-||A||
-|!x.png|alt=x!|
+{code}
+plain
+{code}
 -- warnings.json --
 []

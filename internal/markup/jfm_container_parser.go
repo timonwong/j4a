@@ -34,6 +34,20 @@ type jfmContainerDirectiveParser struct{}
 
 func (jfmContainerDirectiveParser) Trigger() []byte { return []byte{':'} }
 
+func jfmContainerClosingFenceStart[T ~string | ~[]byte](line T) int {
+	for position := 0; position < len(line) && position <= 3; position++ {
+		switch line[position] {
+		case ' ', '\t':
+			continue
+		case ':':
+			return position
+		default:
+			return -1
+		}
+	}
+	return -1
+}
+
 func (jfmContainerDirectiveParser) Open(_ ast.Node, reader text.Reader, context parser.Context) (ast.Node, parser.State) {
 	line, segment := reader.PeekLine()
 	position := context.BlockOffset()
@@ -91,8 +105,8 @@ func (jfmContainerDirectiveParser) Open(_ ast.Node, reader text.Reader, context 
 func (jfmContainerDirectiveParser) Continue(rawNode ast.Node, reader text.Reader, _ parser.Context) parser.State {
 	node := rawNode.(*jfmContainerDirective)
 	line, segment := reader.PeekLine()
-	position := util.FirstNonSpacePosition(line)
-	if position >= 0 && position <= 3 {
+	position := jfmContainerClosingFenceStart(line)
+	if position >= 0 {
 		lineEnd := len(line)
 		for lineEnd > position && (line[lineEnd-1] == '\n' || line[lineEnd-1] == '\r') {
 			lineEnd--

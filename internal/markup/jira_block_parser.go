@@ -21,7 +21,7 @@ func isJiraBlockStart(line string) bool {
 
 var jiraBlockMacroPattern = regexp.MustCompile(`^\{([A-Za-z][A-Za-z0-9-]*)(?::[^}]*)?\}$`)
 
-func parseUnsupportedJiraBlockMacro(ctx context.Context, source string, lines []sourceLine, start int) (jiraMacroParseResult, bool) {
+func parseUnsupportedJiraBlockMacro(ctx context.Context, source string, lines []sourceLine, start, quoteDepth int) (jiraMacroParseResult, bool) {
 	match := jiraBlockMacroPattern.FindStringSubmatch(lines[start].Text)
 	if match == nil {
 		return jiraMacroParseResult{}, false
@@ -48,7 +48,7 @@ func parseUnsupportedJiraBlockMacro(ctx context.Context, source string, lines []
 	}
 	bodyStart := lines[start].End + len(lines[start].EOL)
 	bodyEnd := lines[closeIndex].Start
-	bodyDocument, bodyDiagnostics, err := parseJiraMarkup(ctx, source[bodyStart:bodyEnd])
+	bodyDocument, bodyDiagnostics, err := parseJiraMarkupAtQuoteDepth(ctx, source[bodyStart:bodyEnd], quoteDepth)
 	if err != nil {
 		return jiraMacroParseResult{Err: err}, true
 	}
@@ -145,7 +145,7 @@ func parseJiraListLevel(ctx context.Context, source string, lines []sourceLine, 
 			if err != nil {
 				return listBlock{}, 0, nil, err
 			}
-			item.Children = append(item.Children, child)
+			item.Blocks = append(item.Blocks, child)
 			diagnostics = append(diagnostics, childDiagnostics...)
 			index = next
 		}
@@ -267,7 +267,7 @@ type jiraMacroParseResult struct {
 	Err         error
 }
 
-func parseJiraBlockMacro(ctx context.Context, source string, lines []sourceLine, start int) (jiraMacroParseResult, bool) {
+func parseJiraBlockMacro(ctx context.Context, source string, lines []sourceLine, start, quoteDepth int) (jiraMacroParseResult, bool) {
 	opening := lines[start].Text
 	name := ""
 	switch {
@@ -302,14 +302,42 @@ func parseJiraBlockMacro(ctx context.Context, source string, lines []sourceLine,
 	bodyEnd := lines[closeIndex].Start
 	span := sourceSpan{Start: lines[start].Start, End: lines[closeIndex].End}
 	if name == "quote" {
-		paragraphs, diagnostics, err := parseJiraQuoteParagraphs(ctx, source, bodyStart, bodyEnd)
+		for index := start + 1; index < closeIndex; index++ {
+			if lines[index].Text == "{quote}" && index+1 < closeIndex && lines[index+1].Text == "{quote}" {
+				return jiraMacroParseResult{
+					Block: literalBlock{Span: span, Text: source[span.Start:span.End]},
+					Next:  closeIndex + 1,
+					Diagnostics: []conversionDiagnostic{{offset: span.Start, warning: ConversionWarning{
+						Construct: ConstructBlockquote,
+						Reason:    "adjacent nested Jira quote delimiters are ambiguous and remain literal",
+					}}},
+				}, true
+			}
+		}
+		if quoteDepth >= maxStructuredQuoteDepth {
+			return jiraMacroParseResult{
+				Block: literalBlock{Span: span, Text: source[span.Start:span.End]},
+				Next:  closeIndex + 1,
+				Diagnostics: []conversionDiagnostic{{offset: span.Start, warning: ConversionWarning{
+					Construct: ConstructBlockquote,
+					Reason:    "quote nesting exceeds the maximum structured depth and remains literal",
+				}}},
+			}, true
+		}
+		bodyDocument, diagnostics, err := parseJiraMarkupAtQuoteDepth(ctx, source[bodyStart:bodyEnd], quoteDepth+1)
 		if err != nil {
 			return jiraMacroParseResult{Err: err}, true
 		}
-		return jiraMacroParseResult{Block: quoteBlock{Span: span, Paragraphs: paragraphs}, Next: closeIndex + 1, Diagnostics: diagnostics}, true
+		for blockIndex, block := range bodyDocument.Blocks {
+			bodyDocument.Blocks[blockIndex] = shiftSemanticBlock(block, bodyStart)
+		}
+		for diagnosticIndex := range diagnostics {
+			diagnostics[diagnosticIndex].offset += bodyStart
+		}
+		return jiraMacroParseResult{Block: quoteBlock{Span: span, Blocks: bodyDocument.Blocks}, Next: closeIndex + 1, Diagnostics: diagnostics}, true
 	}
 	if name == "panel" {
-		bodyDocument, bodyDiagnostics, err := parseJiraMarkup(ctx, source[bodyStart:bodyEnd])
+		bodyDocument, bodyDiagnostics, err := parseJiraMarkupAtQuoteDepth(ctx, source[bodyStart:bodyEnd], quoteDepth)
 		if err != nil {
 			return jiraMacroParseResult{Err: err}, true
 		}
@@ -348,7 +376,7 @@ func parseJiraBlockMacro(ctx context.Context, source string, lines []sourceLine,
 			language = normalizeCodeLanguage(attribute.Value)
 		}
 	}
-	directive := len(attributes) > 1
+	directive := len(attributes) == 0 && language == "" || len(attributes) > 1
 	if len(attributes) == 1 && !strings.EqualFold(attributes[0].Name, "language") {
 		directive = true
 	}
@@ -399,89 +427,6 @@ func findJiraSymmetricMacroClose(ctx context.Context, lines []sourceLine, start 
 		}
 	}
 	return candidates[len(candidates)-1], ctx.Err()
-}
-
-func parseJiraQuoteParagraphs(ctx context.Context, source string, start, end int) ([]paragraphBlock, []conversionDiagnostic, error) {
-	paragraphs := make([]paragraphBlock, 0)
-	lines := splitSourceLines(source[start:end])
-	diagnostics := jiraQuoteBlockDiagnostics(lines, start)
-	for index := 0; index < len(lines); {
-		for index < len(lines) && lines[index].Text == "" {
-			index++
-		}
-		if index == len(lines) {
-			break
-		}
-		paragraphStart := index
-		var raw strings.Builder
-		for index < len(lines) && lines[index].Text != "" {
-			if raw.Len() != 0 {
-				raw.WriteByte('\n')
-			}
-			raw.WriteString(lines[index].Text)
-			index++
-		}
-		inlines, inlineDiagnostics, err := parseJiraInlines(ctx, raw.String(), 0, raw.Len())
-		if err != nil {
-			return nil, nil, err
-		}
-		delta := start + lines[paragraphStart].Start
-		for inlineIndex, inline := range inlines {
-			inlines[inlineIndex] = shiftSemanticInline(inline, delta)
-		}
-		for diagnosticIndex := range inlineDiagnostics {
-			inlineDiagnostics[diagnosticIndex].offset += delta
-		}
-		diagnostics = append(diagnostics, inlineDiagnostics...)
-		paragraphs = append(paragraphs, paragraphBlock{Span: sourceSpan{Start: delta, End: start + lines[index-1].End}, Inlines: inlines})
-	}
-	return paragraphs, diagnostics, nil
-}
-
-func jiraQuoteBlockDiagnostics(lines []sourceLine, base int) []conversionDiagnostic {
-	diagnostics := make([]conversionDiagnostic, 0)
-	for index := 0; index < len(lines); {
-		line := lines[index].Text
-		if jiraListLinePattern.MatchString(line) {
-			diagnostics = appendQuoteBlockWarning(diagnostics, base+lines[index].Start)
-			for index < len(lines) && jiraListLinePattern.MatchString(lines[index].Text) {
-				index++
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "|") {
-			diagnostics = appendQuoteBlockWarning(diagnostics, base+lines[index].Start)
-			for index < len(lines) && strings.HasPrefix(lines[index].Text, "|") {
-				index++
-			}
-			continue
-		}
-		if match := jiraBlockMacroPattern.FindStringSubmatch(line); match != nil {
-			diagnostics = appendQuoteBlockWarning(diagnostics, base+lines[index].Start)
-			closing := "{" + match[1] + "}"
-			foundClosing := false
-			for next := index + 1; next < len(lines); next++ {
-				if lines[next].Text == closing {
-					index = next + 1
-					foundClosing = true
-					break
-				}
-			}
-			if !foundClosing {
-				index++
-			}
-			continue
-		}
-		if isJiraBlockStart(line) {
-			diagnostics = appendQuoteBlockWarning(diagnostics, base+lines[index].Start)
-		}
-		index++
-	}
-	return diagnostics
-}
-
-func appendQuoteBlockWarning(diagnostics []conversionDiagnostic, offset int) []conversionDiagnostic {
-	return append(diagnostics, conversionDiagnostic{offset: offset, warning: ConversionWarning{Construct: ConstructBlockquote, Reason: "unsupported block child inside Jira quote remains literal"}})
 }
 
 func parseJiraCodeAttributes(ctx context.Context, opening string, base int) ([]directiveAttribute, error) {
@@ -690,8 +635,8 @@ func shiftSemanticBlock(block semanticBlock, delta int) semanticBlock {
 	case quoteBlock:
 		typed.Span.Start += delta
 		typed.Span.End += delta
-		for paragraphIndex := range typed.Paragraphs {
-			typed.Paragraphs[paragraphIndex] = shiftSemanticBlock(typed.Paragraphs[paragraphIndex], delta).(paragraphBlock)
+		for blockIndex, block := range typed.Blocks {
+			typed.Blocks[blockIndex] = shiftSemanticBlock(block, delta)
 		}
 		return typed
 	case listBlock:
@@ -703,8 +648,8 @@ func shiftSemanticBlock(block semanticBlock, delta int) semanticBlock {
 			for inlineIndex, inline := range typed.Items[itemIndex].Inlines {
 				typed.Items[itemIndex].Inlines[inlineIndex] = shiftSemanticInline(inline, delta)
 			}
-			for childIndex := range typed.Items[itemIndex].Children {
-				typed.Items[itemIndex].Children[childIndex] = shiftSemanticBlock(typed.Items[itemIndex].Children[childIndex], delta).(listBlock)
+			for blockIndex, block := range typed.Items[itemIndex].Blocks {
+				typed.Items[itemIndex].Blocks[blockIndex] = shiftSemanticBlock(block, delta)
 			}
 		}
 		return typed

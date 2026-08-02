@@ -1,9 +1,9 @@
 -- input.md --
-| A |
-| --- |
-| ![x](x.png) |
+Wrapped
+line\
+forced.
 -- want.jira --
-||A||
-|!x.png|alt=x!|
+Wrapped line\\
+forced.
 -- warnings.json --
 []

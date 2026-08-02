@@ -53,7 +53,7 @@ CommonMark-based text with table and strikethrough extensions that jiro converts
 _Avoid_: Jira Markup
 
 **Jiro Flavored Markdown**:
-jiro's reversible Markdown dialect for representing Jira Markup, including jiro-owned extensions for Jira-specific semantics. Supported constructs round-trip to canonical Jira Markup; it is distinct from Markdown Input and does not claim compatibility with other Jira-oriented Markdown dialects.
+jiro's bidirectional Markdown dialect for representing Jira Markup, including jiro-owned extensions for Jira-specific semantics. It is a semantic and input-language superset of Markdown Input. Warning-free constructs round-trip canonically; recognized lossy constructs retain every target-representable semantic and report discarded information separately.
 _Avoid_: Markdown Projection, Jira Flavored Markdown, Markdown Input, Jira export
 
 **Sprint**:

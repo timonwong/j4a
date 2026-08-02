@@ -34,15 +34,11 @@ func renderJFM(ctx context.Context, document semanticDocument) (string, error) {
 		case thematicBreakBlock:
 			blocks = append(blocks, "---")
 		case quoteBlock:
-			paragraphs := make([]string, 0, len(typed.Paragraphs))
-			for _, paragraph := range typed.Paragraphs {
-				content, err := renderJFMInlines(ctx, paragraph.Inlines, true)
-				if err != nil {
-					return "", err
-				}
-				paragraphs = append(paragraphs, prefixQuotedLines(content))
+			content, err := renderJFM(ctx, semanticDocument{Blocks: typed.Blocks})
+			if err != nil {
+				return "", err
 			}
-			blocks = append(blocks, strings.Join(paragraphs, "\n>\n"))
+			blocks = append(blocks, prefixQuotedLines(content))
 		case listBlock:
 			content, err := renderJFMList(ctx, typed, 0)
 			if err != nil {
@@ -347,13 +343,22 @@ func prefixQuotedLines(value string) string {
 }
 
 func renderJFMList(ctx context.Context, list listBlock, depth int) (string, error) {
+	segments := make([]string, 0, len(list.Items))
 	lines := make([]string, 0, len(list.Items))
-	indent := strings.Repeat(" ", depth*4)
-	marker := "-"
-	if list.Ordered {
-		marker = "1."
+	flushLines := func() {
+		if len(lines) == 0 {
+			return
+		}
+		segments = append(segments, strings.Join(lines, "\n"))
+		lines = nil
 	}
+	activeDepth := depth
 	for _, item := range list.Items {
+		indent := strings.Repeat(" ", activeDepth*4)
+		marker := "-"
+		if list.Ordered {
+			marker = "1."
+		}
 		content, err := renderJFMInlines(ctx, item.Inlines, false)
 		if err != nil {
 			return "", err
@@ -363,20 +368,46 @@ func renderJFMList(ctx context.Context, list listBlock, depth int) (string, erro
 			line += " " + content
 		}
 		lines = append(lines, line)
-		for _, child := range item.Children {
-			childText, err := renderJFMList(ctx, child, depth+1)
+		interrupted := false
+		for _, block := range item.Blocks {
+			child, isList := block.(listBlock)
+			if isList && !interrupted && !child.RequiresFlattening {
+				childText, err := renderJFMList(ctx, child, activeDepth+1)
+				if err != nil {
+					return "", err
+				}
+				lines = append(lines, childText)
+				continue
+			}
+			flushLines()
+			interrupted = true
+			activeDepth = 0
+			if isList {
+				childText, err := renderJFMList(ctx, child, 0)
+				if err != nil {
+					return "", err
+				}
+				segments = append(segments, childText)
+				continue
+			}
+			content, err := renderJFM(ctx, semanticDocument{Blocks: []semanticBlock{block}})
 			if err != nil {
 				return "", err
 			}
-			lines = append(lines, childText)
+			segments = append(segments, content)
 		}
 	}
-	return strings.Join(lines, "\n"), nil
+	flushLines()
+	return strings.Join(segments, "\n\n"), nil
 }
 
 func renderJFMTable(ctx context.Context, table tableBlock) (string, error) {
 	if table.Directive || len(table.Header) == 0 {
-		return ":::table\n" + table.Raw + "\n:::", nil
+		fence, err := safeContainerFence(ctx, table.Raw)
+		if err != nil {
+			return "", err
+		}
+		return fence + "table\n" + table.Raw + ensureLiteralClosingSeparation(table.Raw) + fence, nil
 	}
 	rows := make([]string, 0, len(table.Rows)+2)
 	header, err := renderJFMTableRow(ctx, table.Header)
@@ -424,7 +455,15 @@ func renderJFMCodeBlock(ctx context.Context, block codeBlock) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return ":::code{" + serialized + "}\n" + block.Body + ensureLiteralClosingSeparation(block.Body) + ":::", nil
+		fence, err := safeContainerFence(ctx, block.Body)
+		if err != nil {
+			return "", err
+		}
+		header := fence + "code"
+		if serialized != "" {
+			header += "{" + serialized + "}"
+		}
+		return header + "\n" + block.Body + ensureLiteralClosingSeparation(block.Body) + fence, nil
 	}
 	run, err := longestRunWithContext(ctx, block.Body, '`')
 	if err != nil {
@@ -462,31 +501,47 @@ func serializeCodeDirectiveAttributes(ctx context.Context, attributes []directiv
 
 func safeContainerFence(ctx context.Context, body string) (string, error) {
 	longest := 2
-	atLinePrefix := true
-	current := 0
-	for index := 0; index < len(body); index++ {
-		if index&255 == 0 {
+	for lineStart := 0; lineStart <= len(body); {
+		if lineStart&255 == 0 {
 			if err := ctx.Err(); err != nil {
 				return "", err
 			}
 		}
-		if atLinePrefix {
-			if body[index] == ':' {
-				current++
-				continue
+
+		lineEnd := lineStart
+		for lineEnd < len(body) && body[lineEnd] != '\n' && body[lineEnd] != '\r' {
+			if lineEnd&255 == 0 {
+				if err := ctx.Err(); err != nil {
+					return "", err
+				}
 			}
-			if current > longest {
-				longest = current
+			lineEnd++
+		}
+		fenceStart := jfmContainerClosingFenceStart(body[lineStart:lineEnd])
+		if fenceStart < 0 {
+			fenceStart = lineEnd - lineStart
+		}
+		fenceStart += lineStart
+		fenceEnd := fenceStart
+		for fenceEnd < lineEnd && body[fenceEnd] == ':' {
+			if fenceEnd&255 == 0 {
+				if err := ctx.Err(); err != nil {
+					return "", err
+				}
 			}
-			atLinePrefix = false
+			fenceEnd++
 		}
-		if body[index] == '\n' {
-			atLinePrefix = true
-			current = 0
+		if run := fenceEnd - fenceStart; run > longest {
+			longest = run
 		}
-	}
-	if current > longest {
-		longest = current
+
+		if lineEnd == len(body) {
+			break
+		}
+		lineStart = lineEnd + 1
+		if body[lineEnd] == '\r' && lineStart < len(body) && body[lineStart] == '\n' {
+			lineStart++
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err

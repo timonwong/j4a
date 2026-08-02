@@ -126,35 +126,29 @@ func finalizeDiagnostics(source string, diagnostics []conversionDiagnostic) []Co
 		return diagnostics[left].offset < diagnostics[right].offset
 	})
 	warnings := make([]ConversionWarning, len(diagnostics))
+	sourceOffset, line, column := 0, 1, 1
 	for index, diagnostic := range diagnostics {
+		target := min(max(diagnostic.offset, 0), len(source))
+		for sourceOffset < target {
+			switch source[sourceOffset] {
+			case '\r':
+				sourceOffset++
+				if sourceOffset < len(source) && source[sourceOffset] == '\n' {
+					sourceOffset++
+				}
+				line, column = line+1, 1
+			case '\n':
+				sourceOffset++
+				line, column = line+1, 1
+			default:
+				_, size := utf8.DecodeRuneInString(source[sourceOffset:])
+				sourceOffset += size
+				column++
+			}
+		}
 		warning := diagnostic.warning
-		warning.Line, warning.Column = conversionSourcePosition(source, diagnostic.offset)
+		warning.Line, warning.Column = line, column
 		warnings[index] = warning
 	}
 	return warnings
-}
-
-func conversionSourcePosition(source string, target int) (line, column int) {
-	line, column = 1, 1
-	if target <= 0 {
-		return line, column
-	}
-	for offset := 0; offset < len(source) && offset < target; {
-		switch source[offset] {
-		case '\r':
-			offset++
-			if offset < len(source) && source[offset] == '\n' {
-				offset++
-			}
-			line, column = line+1, 1
-		case '\n':
-			offset++
-			line, column = line+1, 1
-		default:
-			_, size := utf8.DecodeRuneInString(source[offset:])
-			offset += size
-			column++
-		}
-	}
-	return line, column
 }
