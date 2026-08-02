@@ -567,14 +567,6 @@ func goldmarkBlockText(source string, lines *text.Segments) string {
 	return result.String()
 }
 
-func sourceBlockSlice(source string, node ast.Node) string {
-	span := goldmarkNodeSpan(node)
-	if span.Start >= 0 && span.End >= span.Start && span.End <= len(source) {
-		return source[span.Start:span.End]
-	}
-	return string(node.Text([]byte(source)))
-}
-
 func goldmarkFencedBlockSource(source string, node *ast.FencedCodeBlock) (sourceSpan, string) {
 	position := node.Pos()
 	if position < 0 && node.Info != nil {
@@ -843,7 +835,6 @@ func sourceSliceForInline(source string, node ast.Node) string {
 	return source[span.Start:span.End]
 }
 
-func unicodeSpace(character rune) bool { return unicode.IsSpace(character) }
 func unicodeSpaceOrControl(character rune) bool {
 	return unicode.IsSpace(character) || unicode.IsControl(character)
 }

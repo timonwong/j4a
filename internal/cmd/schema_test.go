@@ -1,0 +1,186 @@
+package cmd
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestSchemaDocument(t *testing.T) {
+	document := schemaDocument()
+	if document.ContractVersion != "3" || len(document.Commands) == 0 {
+		t.Fatalf("schema = %+v", document)
+	}
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"name":"raw"`) {
+		t.Fatalf("removed --raw flag remains in schema: %s", encoded)
+	}
+	globalFlags := make([]string, 0, len(document.GlobalFlags))
+	for _, flag := range document.GlobalFlags {
+		globalFlags = append(globalFlags, flag.Name)
+	}
+	if strings.Join(globalFlags, ",") != "config,profile,output,quiet" {
+		t.Fatalf("global flags = %v", globalFlags)
+	}
+	if document.Output.SchemaVersion != "1" ||
+		!strings.Contains(document.Output.PartialFailure, "stdout") ||
+		!strings.Contains(document.Output.PartialFailure, "stderr") ||
+		document.ExitCodes["7"] != "partial failure" {
+		t.Fatalf("output contract = %+v exitCodes=%+v", document.Output, document.ExitCodes)
+	}
+	for _, name := range []string{"Version", "Sprint", "IssueLink", "IssueLinkType", "BatchResult", "BatchItem"} {
+		if document.Types[name] == nil {
+			t.Fatalf("schema type %s is missing: %#v", name, document.Types)
+		}
+	}
+	type commandMetadata struct {
+		auth, mutating       bool
+		outputMode           string
+		supportsGlobalOutput bool
+		mutationMode         string
+		readOnlyMethods      []string
+		jsonData             map[string]any
+	}
+	commands := make(map[string]commandMetadata)
+	flags := make(map[string]map[string]struct {
+		repeatable   bool
+		required     bool
+		kind         string
+		defaultValue any
+	})
+	for _, command := range document.Commands {
+		if len(command.Aliases) != 0 {
+			t.Fatalf("%s still exposes aliases %v", command.Name, command.Aliases)
+		}
+		commands[command.Name] = commandMetadata{
+			auth: command.Auth, mutating: command.Mutating, outputMode: command.OutputMode,
+			supportsGlobalOutput: command.SupportsGlobalOutput, mutationMode: command.MutationMode,
+			readOnlyMethods: command.ReadOnlyMethods, jsonData: command.JSONData,
+		}
+		flags[command.Name] = make(map[string]struct {
+			repeatable   bool
+			required     bool
+			kind         string
+			defaultValue any
+		}, len(command.Flags))
+		for _, flag := range command.Flags {
+			flags[command.Name][flag.Name] = struct {
+				repeatable   bool
+				required     bool
+				kind         string
+				defaultValue any
+			}{
+				repeatable:   flag.Repeatable,
+				required:     flag.Required,
+				kind:         flag.Type,
+				defaultValue: flag.Default,
+			}
+		}
+		if strings.HasPrefix(command.Name, "config") {
+			t.Fatalf("removed config command remains in schema: %q", command.Name)
+		}
+		if command.Name != "api" && (command.OutputMode != "normalized" || !command.SupportsGlobalOutput) {
+			t.Fatalf("%s output contract = mode %q supportsGlobalOutput=%t", command.Name, command.OutputMode, command.SupportsGlobalOutput)
+		}
+		if command.Name == "auth status" {
+			for _, field := range []string{"profile", "instance", "authType", "user"} {
+				if command.JSONData[field] == nil {
+					t.Fatalf("auth status JSON schema is missing %q: %#v", field, command.JSONData)
+				}
+			}
+			for _, field := range []string{"authenticated", "credentialStore"} {
+				if command.JSONData[field] != nil {
+					t.Fatalf("auth status JSON schema unexpectedly includes %q: %#v", field, command.JSONData)
+				}
+			}
+		}
+		if strings.HasPrefix(command.Name, "issue bulk ") {
+			items, ok := command.JSONData["items"].([]any)
+			if !ok || len(items) != 1 {
+				t.Fatalf("%s items schema = %#v", command.Name, command.JSONData["items"])
+			}
+			item, ok := items[0].(map[string]any)
+			if !ok || item["current"] == nil || item["target"] == nil || item["outcome"] == nil {
+				t.Fatalf("%s item schema = %#v", command.Name, items[0])
+			}
+		}
+	}
+	api, ok := commands["api"]
+	if !ok || !api.auth || !api.mutating || api.outputMode != "raw_http" || api.supportsGlobalOutput ||
+		api.mutationMode != "http_method" || strings.Join(api.readOnlyMethods, ",") != "GET,HEAD,OPTIONS" || api.jsonData != nil {
+		t.Fatalf("api schema = %+v, present=%t", api, ok)
+	}
+	for _, name := range []string{"method", "input", "string-field", "field", "form", "header", "timeout", "insecure", "include"} {
+		if _, ok := flags["api"][name]; !ok {
+			t.Fatalf("api is missing --%s", name)
+		}
+	}
+	if flags["api"]["method"].kind != "string" {
+		t.Fatalf("api --method type = %q, want string", flags["api"]["method"].kind)
+	}
+	for _, name := range []string{"use-keyring", "password-stdin", "token-stdin"} {
+		if _, ok := flags["auth login"][name]; !ok {
+			t.Fatalf("auth login is missing --%s", name)
+		}
+	}
+	for _, name := range []string{"auth login", "auth logout"} {
+		metadata, ok := commands[name]
+		if !ok || metadata.auth || !metadata.mutating {
+			t.Fatalf("%s schema = %+v, present=%t", name, metadata, ok)
+		}
+	}
+	if metadata, ok := commands["auth status"]; !ok || !metadata.auth || metadata.mutating {
+		t.Fatalf("auth status schema = %+v, present=%t", metadata, ok)
+	}
+	for _, name := range []string{"login", "logout", "myself"} {
+		if _, ok := commands[name]; ok {
+			t.Fatalf("removed top-level command remains in schema: %q", name)
+		}
+	}
+	if metadata, ok := commands["cache refresh"]; !ok || !metadata.auth || !metadata.mutating {
+		t.Fatalf("cache refresh schema = %+v, present=%t", metadata, ok)
+	}
+	for _, command := range []struct {
+		name     string
+		mutating bool
+		flags    []string
+	}{
+		{"issue list", false, []string{"resolution", "reporter", "label", "component", "fix-version", "sprint", "parent", "created", "updated"}},
+		{"issue add", true, []string{"parent", "component", "fix-version", "sprint"}},
+		{"issue update", true, []string{"component", "fix-version", "sprint"}},
+		{"issue move", true, []string{"to"}},
+		{"issue assign", true, []string{"assignee"}},
+		{"issue link list", false, nil},
+		{"issue link add", true, []string{"to", "type"}},
+		{"issue link delete", true, nil},
+		{"issue link types", false, nil},
+		{"issue bulk move", true, []string{"jql", "to", "field", "dry-run", "yes"}},
+		{"issue bulk assign", true, []string{"jql", "assignee", "dry-run", "yes"}},
+	} {
+		metadata, ok := commands[command.name]
+		if !ok || !metadata.auth || metadata.mutating != command.mutating {
+			t.Fatalf("%s schema = %+v, present=%t", command.name, metadata, ok)
+		}
+		for _, name := range command.flags {
+			if _, ok := flags[command.name][name]; !ok {
+				t.Fatalf("%s is missing --%s", command.name, name)
+			}
+		}
+	}
+	for _, command := range []string{"issue list", "issue add", "issue update"} {
+		for _, name := range []string{"label", "component", "fix-version"} {
+			if flag, ok := flags[command][name]; ok && !flag.repeatable {
+				t.Fatalf("%s --%s is not repeatable", command, name)
+			}
+		}
+	}
+	for _, command := range []string{"issue add", "issue update", "issue comment add"} {
+		inputFormat, ok := flags[command]["input-format"]
+		if !ok || inputFormat.kind != "enum:jira|markdown" || inputFormat.defaultValue != "jira" {
+			t.Fatalf("%s --input-format schema = %+v, present=%t", command, inputFormat, ok)
+		}
+	}
+}
