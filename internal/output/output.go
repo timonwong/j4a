@@ -89,6 +89,11 @@ func (r Renderer) WithTerminal(terminal Terminal) Renderer {
 	return r
 }
 
+// IsTTY reports the terminal decision already applied to this renderer.
+func (r Renderer) IsTTY() bool {
+	return r.terminal.IsTTY
+}
+
 type successEnvelope struct {
 	SchemaVersion string    `json:"schemaVersion"`
 	Data          any       `json:"data"`

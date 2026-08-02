@@ -74,6 +74,8 @@ func schemaDocument() cliSchema {
 		},
 		Commands: []commandSchema{
 			commandWithFlags("cache refresh", nil, true, "", nil, object("refreshed", "path", "fieldCount", "fetchedAt", "expiresAt", "instance", "principal")),
+			normalizedCommand(commandSchema{Name: "jfm to-jira", Auth: false, Mutating: false, Args: "[FILE|-]", JSONData: object("jiraMarkup")}),
+			normalizedCommand(commandSchema{Name: "jfm from-jira", Auth: false, Mutating: false, Args: "[FILE|-]", JSONData: object("jfm")}),
 			normalizedCommand(commandSchema{Name: "auth login", Auth: false, Mutating: true, Flags: []flagSchema{
 				flagDefault("use-keyring", "", "boolean", true), flag("password-stdin", "", "boolean"), flag("token-stdin", "", "boolean"),
 			}, JSONData: object("profile", "host", "authType", "credentialStore", "user")}),
@@ -100,20 +102,20 @@ func schemaDocument() cliSchema {
 			commandWithFlags("issue show", nil, false, "ISSUE-KEY", []flagSchema{flag("fields", "", "string-list")}, object("id", "key", "summary", "description", "status", "fields")),
 			commandWithFlags("issue add", nil, true, "", []flagSchema{
 				requiredFlag("project", "p", "string"), requiredFlag("type", "t", "string"), requiredFlag("summary", "s", "string"),
-				flag("description", "", "string"), flag("description-file", "", "path-or-stdin"), flagDefault("input-format", "", "enum:jira|markdown", "jira"),
+				flag("description", "", "string"), flag("description-file", "", "path-or-stdin"), flagDefault("input-format", "", "enum:jira|jfm|markdown", "jira"),
 				flag("priority", "", "string"), flag("assignee", "", "string"), repeatableFlag("label", "", "string"), flag("parent", "", "issue-key"),
 				repeatableFlag("component", "", "string"), repeatableFlag("fix-version", "", "string"), flag("sprint", "", "string"), repeatableFlag("field", "", "key=value"),
 			}, object("id", "key", "sprint", "sprintMoved")),
 			commandWithFlags("issue update", nil, true, "ISSUE-KEY", []flagSchema{
 				flag("summary", "s", "string"), flag("description", "", "string"), flag("description-file", "", "path-or-stdin"),
-				flagDefault("input-format", "", "enum:jira|markdown", "jira"), flag("priority", "", "string"), flag("assignee", "", "string"),
+				flagDefault("input-format", "", "enum:jira|jfm|markdown", "jira"), flag("priority", "", "string"), flag("assignee", "", "string"),
 				repeatableFlag("label", "", "string"), repeatableFlag("component", "", "string"), repeatableFlag("fix-version", "", "string"), flag("sprint", "", "string"), repeatableFlag("field", "", "key=value"),
 			}, object("key", "updated", "sprint", "sprintMoved")),
 			commandWithFlags("issue comment list", nil, false, "ISSUE-KEY", []flagSchema{
 				flagDefault("limit", "n", "integer", 50), flagDefault("offset", "", "integer", 0),
 			}, object("issueKey", "comments")),
 			commandWithFlags("issue comment add", nil, true, "ISSUE-KEY", []flagSchema{
-				flag("body", "", "string"), flag("body-file", "", "path-or-stdin"), flagDefault("input-format", "", "enum:jira|markdown", "jira"),
+				flag("body", "", "string"), flag("body-file", "", "path-or-stdin"), flagDefault("input-format", "", "enum:jira|jfm|markdown", "jira"),
 			}, object("id", "body", "author", "created")),
 			command("issue list-transitions", false, "ISSUE-KEY", object("issueKey", "transitions")),
 			commandWithFlags("issue move", nil, true, "ISSUE-KEY", []flagSchema{

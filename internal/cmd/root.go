@@ -38,7 +38,7 @@ type app struct {
 // Execute runs jiro and returns a stable process exit code.
 func Execute(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	a := &app{stdin: stdin, stdout: stdout, stderr: stderr}
-	if isAPIInvocation(args) {
+	if isAPIInvocation(args) || isJFMInvocation(args) {
 		ctx, stop, signalCode := executionSignalContext()
 		defer stop()
 		return a.executeContext(ctx, args, signalCode)
@@ -51,11 +51,14 @@ func (a *app) execute(args []string) int {
 }
 
 func (a *app) executeContext(ctx context.Context, args []string, signalCode func() int) int {
+	return a.executeWithRoot(ctx, a.rootCommand(), args, signalCode)
+}
+
+func (a *app) executeWithRoot(ctx context.Context, root *cobra.Command, args []string, signalCode func() int) int {
 	a.warnings = nil
 	if a.terminal == nil {
 		a.terminal = newLoginTerminal(a.stdin, a.stderr)
 	}
-	root := a.rootCommand()
 	root.SetContext(ctx)
 	root.SetArgs(args)
 	if isAPIInvocation(args) && hasExplicitOutputFlag(args) {
@@ -64,6 +67,12 @@ func (a *app) executeContext(ctx context.Context, args []string, signalCode func
 	}
 	executed, err := root.ExecuteC()
 	if err != nil {
+		if isJFMConversionCommand(executed) {
+			if code := signalCode(); code != 0 && errors.Is(ctx.Err(), context.Canceled) {
+				_, _ = fmt.Fprintln(a.stderr, "conversion canceled")
+				return code
+			}
+		}
 		if isRawHTTPCommand(executed) {
 			if code := signalCode(); code != 0 && errors.Is(ctx.Err(), context.Canceled) {
 				_, _ = fmt.Fprintln(a.stderr, "request canceled")
@@ -125,6 +134,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.apiCommand(),
 		a.authCommand(),
 		a.cacheCommand(),
+		a.jfmCommand(),
 		a.issueCommand(),
 		a.projectCommand(),
 		a.fieldCommand(),

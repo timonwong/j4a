@@ -1,10 +1,91 @@
 package markup
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"unicode"
+
+	"github.com/yuin/goldmark/util"
 )
+
+var codeLanguageAliases = map[string]string{
+	"javascript": "javascript",
+	"js":         "javascript",
+	"jsx":        "javascript",
+	"mjs":        "javascript",
+	"bash":       "bash",
+	"sh":         "bash",
+	"shell":      "bash",
+	"zsh":        "bash",
+}
+
+const codeSpanEscapedDelimiters = `{}[]|-*_`
+
+func decodedMarkdownText(value []byte, raw bool) []byte {
+	if raw {
+		return value
+	}
+	value = util.UnescapePunctuations(value)
+	value = util.ResolveNumericReferences(value)
+	return util.ResolveEntityNames(value)
+}
+
+func dangerousDestinationScheme(destination []byte) (string, bool) {
+	separator := bytes.IndexByte(destination, ':')
+	if separator <= 0 {
+		return "", false
+	}
+	for index, character := range destination[:separator] {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(index > 0 && ((character >= '0' && character <= '9') || character == '+' || character == '-' || character == '.')) {
+			continue
+		}
+		return "", false
+	}
+	scheme := strings.ToLower(string(destination[:separator]))
+	switch scheme {
+	case "javascript", "vbscript", "data":
+		return scheme, true
+	default:
+		return "", false
+	}
+}
+
+func jiraLineControlPrefixLength(value string) int {
+	if len(value) >= 3 && value[0] == 'h' && value[1] >= '1' && value[1] <= '6' && value[2] == '.' &&
+		(len(value) == 3 || value[3] == ' ') {
+		return 3
+	}
+	if strings.HasPrefix(value, "bq.") && (len(value) == 3 || value[3] == ' ') {
+		return 3
+	}
+	return 0
+}
+
+func escapeCodeSpan(value string) string {
+	var separated strings.Builder
+	for index := 0; index < len(value); index++ {
+		if value[index] == '\\' && index+1 < len(value) && strings.ContainsRune(codeSpanEscapedDelimiters, rune(value[index+1])) {
+			separated.WriteByte('\\')
+			separated.WriteRune('\u200b')
+			continue
+		}
+		separated.WriteByte(value[index])
+	}
+
+	var escaped strings.Builder
+	for _, character := range separated.String() {
+		if strings.ContainsRune(codeSpanEscapedDelimiters, character) {
+			escaped.WriteByte('\\')
+		}
+		escaped.WriteRune(character)
+	}
+	if strings.HasSuffix(escaped.String(), `\`) {
+		escaped.WriteRune('\u200b')
+	}
+	return escaped.String()
+}
 
 func combinedBoldItalic(inline styledInline) ([]semanticInline, bool) {
 	if len(inline.Children) != 1 || inline.Style != styleBold && inline.Style != styleItalic {

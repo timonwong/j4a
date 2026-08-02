@@ -145,7 +145,7 @@ func TestJSONErrorUsesStderrAndExitCode(t *testing.T) {
 	}
 }
 
-func TestCustomFieldAliasAndMarkdownCreate(t *testing.T) {
+func TestCustomFieldAliasAndJFMCreate(t *testing.T) {
 	clearCommandEnv(t)
 	var fieldCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -180,81 +180,10 @@ func TestCustomFieldAliasAndMarkdownCreate(t *testing.T) {
 	code := a.execute([]string{
 		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "add",
 		"--project", "OPS", "--type", "Story", "--summary", "Structured output",
-		"--description", "# Header", "--input-format=markdown", "--field", "story-points=5",
+		"--description", "# Header", "--input-format=jfm", "--field", "story-points=5",
 	})
 	if code != 0 || stderr.Len() != 0 || fieldCalls.Load() != 1 {
 		t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, fieldCalls.Load(), stdout.String(), stderr.String())
-	}
-}
-
-func TestMarkdownInputConversionFailureStopsMutationBeforeJiraRequest(t *testing.T) {
-	clearCommandEnv(t)
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		calls.Add(1)
-	}))
-	defer server.Close()
-	configPath := writeCLIConfig(t, server.URL, false)
-	unsupportedTableCell := "| H |\n| --- |\n| ![alt](image.png) |"
-	errorMessage := "convert Markdown Input: Markdown Input conversion failed at line 3, column 3 (Image): images are not supported in table cells"
-	outputs := []struct {
-		name string
-		arg  string
-		want string
-	}{
-		{
-			name: "stable JSON envelope",
-			arg:  "-ojson",
-			want: `{"schemaVersion":"1","error":{"kind":"invalid_input","message":"` + errorMessage + `"}}` + "\n",
-		},
-		{
-			name: "readable text error",
-			want: errorMessage + "\n",
-		},
-	}
-
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{
-			name: "issue create",
-			args: []string{
-				"issue", "add", "--project", "OPS", "--type", "Story", "--summary", "Unsupported input",
-				"--description", unsupportedTableCell, "--input-format=markdown", "--field", "story-points=5",
-			},
-		},
-		{
-			name: "issue update",
-			args: []string{
-				"issue", "update", "OPS-1", "--description", unsupportedTableCell, "--input-format=markdown",
-				"--field", "story-points=5",
-			},
-		},
-		{
-			name: "issue comment",
-			args: []string{"issue", "comment", "add", "OPS-1", "--body", unsupportedTableCell, "--input-format=markdown"},
-		},
-	}
-	for _, test := range tests {
-		for _, output := range outputs {
-			t.Run(test.name+"/"+output.name, func(t *testing.T) {
-				calls.Store(0)
-				stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-				args := []string{"--config", configPath}
-				if output.arg != "" {
-					args = append(args, output.arg)
-				}
-				args = append(args, test.args...)
-				code := Execute(args, strings.NewReader(""), stdout, stderr)
-				if code != 2 || stdout.Len() != 0 || calls.Load() != 0 {
-					t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls.Load(), stdout.String(), stderr.String())
-				}
-				if stderr.String() != output.want {
-					t.Fatalf("stderr = %q, want %q", stderr.String(), output.want)
-				}
-			})
-		}
 	}
 }
 

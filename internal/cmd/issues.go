@@ -116,7 +116,7 @@ func (a *app) issueShowCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.render(issue, issueTable(issue))
+			return a.renderIssueShow(issue)
 		},
 	}
 	command.Flags().StringSliceVar(&fields, "fields", nil, "comma-separated Jira fields to request")
@@ -147,7 +147,7 @@ func (a *app) issueCreateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			descriptionValue, err = convertToJiraMarkup(descriptionValue, format)
+			descriptionValue, err = a.convertToJiraMarkup(command.Context(), descriptionValue, format, "description")
 			if err != nil {
 				return err
 			}
@@ -190,7 +190,7 @@ func (a *app) issueCreateCommand() *cobra.Command {
 	flags.StringVarP(&summary, "summary", "s", "", "issue summary")
 	flags.StringVar(&description, "description", "", "description text")
 	flags.StringVar(&descriptionFile, "description-file", "", "description file path, or - for stdin")
-	flags.StringVar(&inputFormat, "input-format", "jira", "text input format: jira or markdown")
+	flags.StringVar(&inputFormat, "input-format", "jira", "text input format: jira, jfm, or markdown")
 	flags.StringVar(&priority, "priority", "", "priority name")
 	flags.StringVar(&assignee, "assignee", "", "assignee username; use none to clear")
 	flags.StringSliceVar(&labels, "label", nil, "label; repeat or pass comma-separated values")
@@ -223,7 +223,7 @@ func (a *app) issueUpdateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			descriptionValue, err = convertToJiraMarkup(descriptionValue, format)
+			descriptionValue, err = a.convertToJiraMarkup(command.Context(), descriptionValue, format, "description")
 			if err != nil {
 				return err
 			}
@@ -277,7 +277,7 @@ func (a *app) issueUpdateCommand() *cobra.Command {
 	flags.StringVarP(&summary, "summary", "s", "", "new issue summary")
 	flags.StringVar(&description, "description", "", "description text")
 	flags.StringVar(&descriptionFile, "description-file", "", "description file path, or - for stdin")
-	flags.StringVar(&inputFormat, "input-format", "jira", "text input format: jira or markdown")
+	flags.StringVar(&inputFormat, "input-format", "jira", "text input format: jira, jfm, or markdown")
 	flags.StringVar(&priority, "priority", "", "priority name")
 	flags.StringVar(&assignee, "assignee", "", "assignee username; use none to clear")
 	flags.StringSliceVar(&labels, "label", nil, "replacement labels; repeat or pass comma-separated values")
@@ -348,7 +348,7 @@ func (a *app) issueCommentCommand() *cobra.Command {
 			if bodyValue == nil || *bodyValue == "" {
 				return apperr.New(apperr.KindInvalidInput, "comment body is required")
 			}
-			bodyValue, err = convertToJiraMarkup(bodyValue, format)
+			bodyValue, err = a.convertToJiraMarkup(command.Context(), bodyValue, format, "body")
 			if err != nil {
 				return err
 			}
@@ -363,7 +363,7 @@ func (a *app) issueCommentCommand() *cobra.Command {
 	flags := command.Flags()
 	flags.StringVar(&body, "body", "", "comment body")
 	flags.StringVar(&bodyFile, "body-file", "", "comment body file path, or - for stdin")
-	flags.StringVar(&inputFormat, "input-format", "jira", "text input format: jira or markdown")
+	flags.StringVar(&inputFormat, "input-format", "jira", "text input format: jira, jfm, or markdown")
 	return command
 }
 
@@ -467,7 +467,7 @@ func applyNamedIssueField(fields map[string]any, key string, values []string, ch
 	fields[key] = named
 }
 
-func issueTable(issue jira.Issue) output.Table {
+func issueShowSections(issue jira.Issue) []issueShowSection {
 	status, issueType, priority, assignee, reporter, parent := "", "", "", "", "", ""
 	if issue.Status != nil {
 		status = issue.Status.Name
@@ -495,14 +495,20 @@ func issueTable(issue jira.Issue) output.Table {
 	for _, version := range issue.FixVersions {
 		fixVersions = append(fixVersions, version.Name)
 	}
-	rows := [][]string{
-		{"Key", issue.Key}, {"Summary", issue.Summary}, {"Status", status},
-		{"Type", issueType}, {"Priority", priority}, {"Assignee", assignee},
-		{"Reporter", reporter}, {"Labels", joinNames(issue.Labels)},
-		{"Parent", parent}, {"Components", joinNames(components)}, {"Fix Versions", joinNames(fixVersions)},
-		{"Description", issue.Description},
+	return []issueShowSection{
+		{header: "KEY", value: issue.Key},
+		{header: "SUMMARY", value: issue.Summary},
+		{header: "STATUS", value: status},
+		{header: "TYPE", value: issueType},
+		{header: "PRIORITY", value: priority},
+		{header: "ASSIGNEE", value: assignee},
+		{header: "REPORTER", value: reporter},
+		{header: "LABELS", value: joinNames(issue.Labels)},
+		{header: "PARENT", value: parent},
+		{header: "COMPONENTS", value: joinNames(components)},
+		{header: "FIX VERSIONS", value: joinNames(fixVersions)},
+		{header: "DESCRIPTION", value: issue.Description},
 	}
-	return output.Table{Columns: []output.Column{output.Fixed("FIELD"), output.Flexible("VALUE")}, Rows: rows}
 }
 
 func matchTransition(target string, transitions []jira.Transition) (jira.Transition, error) {

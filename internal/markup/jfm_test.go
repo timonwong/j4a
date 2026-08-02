@@ -35,42 +35,6 @@ func TestFromJFMGolden(t *testing.T) {
 	})
 }
 
-func TestJFMIsASemanticInputSupersetOfMarkdownInput(t *testing.T) {
-	t.Parallel()
-	entries, err := os.ReadDir("testdata/markdown_input")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".txtar" {
-			continue
-		}
-		entry := entry
-		t.Run(strings.TrimSuffix(entry.Name(), ".txtar"), func(t *testing.T) {
-			t.Parallel()
-			archive, err := txtar.ParseFile(filepath.Join("testdata/markdown_input", entry.Name()))
-			if err != nil {
-				t.Fatal(err)
-			}
-			sections := map[string]string{}
-			for _, file := range archive.Files {
-				sections[file.Name] = string(file.Data)
-			}
-			want := strings.TrimSuffix(sections["want.jira"], "\n")
-			if richer, ok := sections["want.jfm.jira"]; ok {
-				want = strings.TrimSuffix(richer, "\n")
-			}
-			result, err := markup.FromJFM(context.Background(), sections["input.md"])
-			if err != nil {
-				t.Fatalf("FromJFM() error = %v", err)
-			}
-			if result.Markup != want {
-				t.Fatalf("FromJFM() = %q, want %q", result.Markup, want)
-			}
-		})
-	}
-}
-
 func TestJFMSpecExamplesConform(t *testing.T) {
 	t.Parallel()
 	source, err := os.ReadFile("../../docs/jiro-flavored-markdown.md")

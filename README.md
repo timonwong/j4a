@@ -290,12 +290,18 @@ Commands with tabular text output adapt to stdout:
 
 - A terminal receives a column-aligned table sized to the available width.
   Fixed Issue Key, ID, Alias, and similar columns remain complete. Descriptive
-  columns and mixed detail-table `VALUE` columns may be truncated with `...`.
+  columns may be truncated with `...`.
 - A pipe or file receives headerless TSV with untruncated, single-line values.
   An empty result writes zero bytes.
 
 Table cells are rendered as safe single-line text. JSON retains the original
 values.
+
+`jiro issue show` is the detail-view exception. Text output uses man-page-style
+sections with uppercase field headers and four-space-indented values. TTY
+headers are bold; piped or redirected headers contain no ANSI styling. Values
+retain physical line breaks and are never wrapped or truncated by jiro. Empty
+fields remain visible. JSON output is unchanged.
 
 Set `JIRO_FORCE_TTY` to `1`, `true`, `yes`, or `on` to keep
 terminal-style output in a pipeline:
@@ -391,10 +397,10 @@ continues with the stale mapping, including for Issue mutations, and emits a
 warning. `jiro field list --custom` uses the same snapshot; the complete
 `field list` remains live.
 
-### Jira Markup and Markdown Input
+### Jira Markup and Jiro Flavored Markdown
 
-Descriptions and comments use Jira Markup by default. Request Markdown
-conversion explicitly:
+Descriptions and comments use Jira Markup by default. Request Jiro Flavored
+Markdown (JFM) conversion explicitly:
 
 ```sh
 jiro issue add \
@@ -402,16 +408,28 @@ jiro issue add \
   --type Task \
   --summary "Document rollout" \
   --description-file issue.md \
-  --input-format=markdown
+  --input-format=jfm
 ```
 
-The accepted Markdown Input dialect and its exact conversion behavior are
-documented in [`docs/markdown-input.md`](docs/markdown-input.md).
-The bidirectional Jiro Flavored Markdown format is specified independently in
+`markdown` is a permanent, warning-free alias for the canonical `jfm` value.
+The bidirectional format and its exact conversion behavior are specified in
 [`docs/jiro-flavored-markdown.md`](docs/jiro-flavored-markdown.md).
 
 Long text accepts inline input, a file path, or `-` for stdin. Inline and file
 forms are mutually exclusive.
+
+Convert documents locally without loading Jira configuration or credentials:
+
+```sh
+jiro jfm to-jira description.md
+jiro jfm from-jira description.jira
+cat description.md | jiro jfm to-jira
+```
+
+Each command accepts at most one file path. With no path or with `-`, it reads
+stdin. Text mode writes only the exact converted document to stdout; conversion
+warnings go to stderr. `--output=json` uses the normal versioned envelope with
+`jiraMarkup` or `jfm` data and structured warnings.
 
 ### Raw Jira API
 

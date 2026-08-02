@@ -1,9 +1,0 @@
--- input.md --
-| Name | Details |
-| :--- | :---: |
-| **jiro** | _Markdown_ with ~~old~~ and `code` |
-| [Docs](https://example.com/docs) | literal \| pipe |
--- want.jira --
-||Name||Details||
-|*jiro*|_Markdown_ with -old- and {{code}}|
-|[Docs|https://example.com/docs]|literal \| pipe|

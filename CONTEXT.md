@@ -48,13 +48,9 @@ _Avoid_: Field configuration, field registry
 Jira's wiki-style text notation accepted directly by Jira Data Center and Server rich-text fields.
 _Avoid_: Jira Markdown, wiki Markdown
 
-**Markdown Input**:
-CommonMark-based text with table and strikethrough extensions that jiro converts to Jira Markup only when explicitly requested. It has no task-list, bare-autolink, malformed-input-repair, or embedded Jira Markup semantics.
-_Avoid_: Jira Markup
-
 **Jiro Flavored Markdown**:
-jiro's bidirectional Markdown dialect for representing Jira Markup, including jiro-owned extensions for Jira-specific semantics. It is a semantic and input-language superset of Markdown Input. Warning-free constructs round-trip canonically; recognized lossy constructs retain every target-representable semantic and report discarded information separately.
-_Avoid_: Markdown Projection, Jira Flavored Markdown, Markdown Input, Jira export
+jiro's sole Markdown-based format for representing Jira Markup bidirectionally, including jiro-owned extensions for Jira-specific semantics. Warning-free constructs round-trip canonically; recognized lossy constructs retain every target-representable semantic and report discarded information separately.
+_Avoid_: Markdown Input, Markdown Projection, Jira Flavored Markdown, Jira export
 
 **Sprint**:
 A Jira Software planning interval that groups Issues for a time-bounded body of work.

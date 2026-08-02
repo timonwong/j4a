@@ -32,7 +32,20 @@ type capturedMutationRequest struct {
 	err     error
 }
 
-func TestMarkdownCapableMutationsShareTheTextInputContract(t *testing.T) {
+type textMutationExecution struct {
+	source       string
+	input        string
+	format       string
+	outputFormat string
+}
+
+type textMutationResult struct {
+	requestText string
+	stdout      string
+	stderr      string
+}
+
+func TestJFMCapableMutationsShareTheTextInputContract(t *testing.T) {
 	formats := []struct {
 		name   string
 		input  string
@@ -40,7 +53,13 @@ func TestMarkdownCapableMutationsShareTheTextInputContract(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "Markdown Input is converted",
+			name:   "canonical JFM input is converted",
+			input:  "# Release\n\n- **done**\n- [docs](https://example.com)",
+			format: "jfm",
+			want:   "h1. Release\n\n* *done*\n* [docs|https://example.com]",
+		},
+		{
+			name:   "markdown is a warning-free JFM alias",
 			input:  "# Release\n\n- **done**\n- [docs](https://example.com)",
 			format: "markdown",
 			want:   "h1. Release\n\n* *done*\n* [docs|https://example.com]",
@@ -52,7 +71,26 @@ func TestMarkdownCapableMutationsShareTheTextInputContract(t *testing.T) {
 		},
 	}
 	sources := []string{"inline", "file", "stdin"}
-	commands := []textMutationCommand{
+	commands := textMutationCommands()
+
+	for _, format := range formats {
+		for _, command := range commands {
+			for _, source := range sources {
+				t.Run(format.name+"/"+command.name+"/"+source, func(t *testing.T) {
+					result := executeTextMutation(t, command, textMutationExecution{
+						source: source, input: format.input, format: format.format, outputFormat: "json",
+					})
+					if result.requestText != format.want || result.stderr != "" {
+						t.Fatalf("request text = %q, stderr=%q, want %q", result.requestText, result.stderr, format.want)
+					}
+				})
+			}
+		}
+	}
+}
+
+func textMutationCommands() []textMutationCommand {
+	return []textMutationCommand{
 		{
 			name:        "issue create",
 			method:      http.MethodPost,
@@ -86,14 +124,61 @@ func TestMarkdownCapableMutationsShareTheTextInputContract(t *testing.T) {
 			response:    `{"id":"7","body":"accepted"}`,
 		},
 	}
+}
 
-	for _, format := range formats {
-		for _, command := range commands {
-			for _, source := range sources {
-				t.Run(format.name+"/"+command.name+"/"+source, func(t *testing.T) {
-					got := executeTextMutation(t, command, source, format.input, format.format)
-					if got != format.want {
-						t.Fatalf("request text = %q, want %q", got, format.want)
+func TestJFMConversionWarningsRemainStructuredAndDoNotStopMutations(t *testing.T) {
+	const input = `[Title](https://example.com "Read")`
+	const converted = `[Title|https://example.com]`
+	const message = "JFM to Jira conversion at line 1, column 1 (link): Markdown link title was discarded because Jira Markup has no equivalent"
+
+	for _, format := range []string{"jfm", "markdown"} {
+		for _, command := range textMutationCommands() {
+			for _, outputFormat := range []string{"text", "json"} {
+				t.Run(format+"/"+command.name+"/"+outputFormat, func(t *testing.T) {
+					result := executeTextMutation(t, command, textMutationExecution{
+						source: "inline", input: input, format: format, outputFormat: outputFormat,
+					})
+					if result.requestText != converted {
+						t.Fatalf("request text = %q, want %q", result.requestText, converted)
+					}
+					if outputFormat == "text" {
+						if result.stderr != "warning: "+message+"\n" || result.stdout == "" {
+							t.Fatalf("stdout=%q stderr=%q", result.stdout, result.stderr)
+						}
+						return
+					}
+					if result.stderr != "" {
+						t.Fatalf("stderr = %q, want empty", result.stderr)
+					}
+					var envelope struct {
+						Warnings []struct {
+							Code    string `json:"code"`
+							Message string `json:"message"`
+							Details struct {
+								Direction string `json:"direction"`
+								Field     string `json:"field"`
+								Line      int    `json:"line"`
+								Column    int    `json:"column"`
+								Construct string `json:"construct"`
+								Reason    string `json:"reason"`
+							} `json:"details"`
+						} `json:"warnings"`
+					}
+					if err := json.Unmarshal([]byte(result.stdout), &envelope); err != nil {
+						t.Fatal(err)
+					}
+					if len(envelope.Warnings) != 1 {
+						t.Fatalf("warnings = %+v", envelope.Warnings)
+					}
+					warning := envelope.Warnings[0]
+					wantField := "description"
+					if command.name == "issue comment" {
+						wantField = "body"
+					}
+					if warning.Code != "jfm_conversion" || warning.Message != message || warning.Details.Direction != "jfm_to_jira" ||
+						warning.Details.Field != wantField || warning.Details.Line != 1 || warning.Details.Column != 1 ||
+						warning.Details.Construct != "link" || warning.Details.Reason != "Markdown link title was discarded because Jira Markup has no equivalent" {
+						t.Fatalf("warning = %+v", warning)
 					}
 				})
 			}
@@ -101,7 +186,31 @@ func TestMarkdownCapableMutationsShareTheTextInputContract(t *testing.T) {
 	}
 }
 
-func executeTextMutation(t *testing.T, command textMutationCommand, source, input, format string) string {
+func TestInvalidTextInputFormatStopsMutationBeforeJiraRequest(t *testing.T) {
+	clearCommandEnv(t)
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		calls.Add(1)
+	}))
+	defer server.Close()
+	configPath := writeCLIConfig(t, server.URL, false)
+
+	for _, command := range textMutationCommands() {
+		t.Run(command.name, func(t *testing.T) {
+			calls.Store(0)
+			args := append([]string{"--config", configPath}, command.args...)
+			args = append(args, command.inlineFlag, "text", "--input-format=html")
+			stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+			code := Execute(args, strings.NewReader(""), stdout, stderr)
+			if code != 2 || calls.Load() != 0 || stdout.Len() != 0 ||
+				stderr.String() != "input format must be jira, jfm, or markdown\n" {
+				t.Fatalf("code=%d calls=%d stdout=%q stderr=%q", code, calls.Load(), stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func executeTextMutation(t *testing.T, command textMutationCommand, execution textMutationExecution) textMutationResult {
 	t.Helper()
 	clearCommandEnv(t)
 
@@ -119,30 +228,34 @@ func executeTextMutation(t *testing.T, command textMutationCommand, source, inpu
 	}))
 	defer server.Close()
 
-	args := append([]string{"--config", writeCLIConfig(t, server.URL, false), "-ojson"}, command.args...)
+	args := []string{"--config", writeCLIConfig(t, server.URL, false)}
+	if execution.outputFormat == "json" {
+		args = append(args, "--output=json")
+	}
+	args = append(args, command.args...)
 	stdin := strings.NewReader("")
-	switch source {
+	switch execution.source {
 	case "inline":
-		args = append(args, command.inlineFlag, input)
+		args = append(args, command.inlineFlag, execution.input)
 	case "file":
 		path := filepath.Join(t.TempDir(), "input.txt")
-		if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+		if err := os.WriteFile(path, []byte(execution.input), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		args = append(args, command.fileFlag, path)
 	case "stdin":
-		stdin = strings.NewReader(input)
+		stdin = strings.NewReader(execution.input)
 		args = append(args, command.fileFlag, "-")
 	default:
-		t.Fatalf("unknown source %q", source)
+		t.Fatalf("unknown source %q", execution.source)
 	}
-	if format != "" {
-		args = append(args, "--input-format="+format)
+	if execution.format != "" {
+		args = append(args, "--input-format="+execution.format)
 	}
 
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute(args, stdin, stdout, stderr)
-	if code != 0 || stderr.Len() != 0 || calls.Load() != 1 {
+	if code != 0 || calls.Load() != 1 {
 		t.Fatalf("code=%d calls=%d stdout=%s stderr=%s", code, calls.Load(), stdout.String(), stderr.String())
 	}
 	request := <-captured
@@ -156,7 +269,7 @@ func executeTextMutation(t *testing.T, command textMutationCommand, source, inpu
 	if !ok {
 		t.Fatalf("payload path %v is not a string: %#v", command.payloadPath, request.payload)
 	}
-	return value
+	return textMutationResult{requestText: value, stdout: stdout.String(), stderr: stderr.String()}
 }
 
 func stringAtJSONPath(value map[string]any, path ...string) (string, bool) {
