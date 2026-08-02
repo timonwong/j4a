@@ -12,6 +12,8 @@ func TestCanonicalCommandTreeUsesSingularPaths(t *testing.T) {
 
 	for _, path := range []string{
 		"api",
+		"jfm to-jira",
+		"jfm from-jira",
 		"cache refresh",
 		"field list",
 		"project list",

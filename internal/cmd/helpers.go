@@ -70,26 +70,42 @@ func readText(reader io.Reader, inline string, inlineSet bool, file string) (*st
 	return &value, nil
 }
 
-func parseInputFormat(value string) (markup.InputFormat, error) {
-	switch markup.InputFormat(strings.ToLower(value)) {
-	case "", markup.JiraMarkup:
-		return markup.JiraMarkup, nil
-	case markup.Markdown:
-		return markup.Markdown, nil
+type textInputFormat string
+
+const (
+	inputFormatJira textInputFormat = "jira"
+	inputFormatJFM  textInputFormat = "jfm"
+)
+
+func parseInputFormat(value string) (textInputFormat, error) {
+	switch strings.ToLower(value) {
+	case "", "jira":
+		return inputFormatJira, nil
+	case "jfm", "markdown":
+		return inputFormatJFM, nil
 	default:
-		return "", apperr.New(apperr.KindInvalidInput, "input format must be jira or markdown")
+		return "", apperr.New(apperr.KindInvalidInput, "input format must be jira, jfm, or markdown")
 	}
 }
 
-func convertToJiraMarkup(input *string, format markup.InputFormat) (*string, error) {
+func (a *app) convertToJiraMarkup(ctx context.Context, input *string, format textInputFormat, field string) (*string, error) {
 	if input == nil {
 		return nil, nil
 	}
-	converted, err := markup.ToJira(*input, format)
-	if err != nil {
-		return nil, apperr.Wrap(apperr.KindInvalidInput, err, "convert Markdown Input: %v", err)
+	if format == inputFormatJira {
+		return input, nil
 	}
-	return &converted, nil
+	converted, err := markup.FromJFM(ctx, *input)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, apperr.Wrap(apperr.KindUnexpected, err, "convert JFM input: %v", err)
+	}
+	for _, warning := range jfmConversionWarnings(jfmToJiraDirection, converted.Warnings, map[string]any{"field": field}) {
+		a.addWarning(warning)
+	}
+	return &converted.Markup, nil
 }
 
 func (a *app) resolveFields(ctx context.Context, client *jira.Client, settings config.Settings, values []string) (map[string]any, error) {

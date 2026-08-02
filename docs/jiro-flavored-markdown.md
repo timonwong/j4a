@@ -10,9 +10,9 @@ A conforming converter MUST implement both conversion directions. Supporting onl
 
 JFM uses [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) as its Markdown foundation and adds tables, strikethrough, controlled inline HTML, and the directives defined here. Where this specification does not override CommonMark, CommonMark rules apply.
 
-JFM is a semantic and input-language superset of jiro Markdown Input. Every document accepted by Markdown Input MUST remain convertible as JFM. JFM may preserve information that Markdown Input historically discarded, so the resulting Jira Markup is not required to be byte-for-byte identical.
+JFM is jiro's complete Markdown-based format for bidirectional conversion with Jira Markup. JFM to Jira Markup conversion preserves target-representable semantics but is not required to preserve source spelling or produce byte-for-byte identical text.
 
-JFM is distinct from Markdown Input and from unrelated Jira-oriented Markdown dialects. A JFM document has no required front matter, magic header, or embedded format-version directive. New syntax SHOULD be additive; an older converter encountering an unknown directive applies the literal-fallback rules in this specification.
+JFM is distinct from unrelated Jira-oriented Markdown dialects. A JFM document has no required front matter, magic header, or embedded format-version directive. New syntax SHOULD be additive; an older converter encountering an unknown directive applies the literal-fallback rules in this specification.
 
 The following CommonMark-looking forms have explicit JFM boundaries:
 

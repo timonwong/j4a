@@ -38,13 +38,17 @@ func executionSignalContext() (context.Context, func(), func() int) {
 }
 
 func isAPIInvocation(args []string) bool {
+	return isCommandInvocation(args, "api")
+}
+
+func isCommandInvocation(args []string, name string) bool {
 	valueFlags := map[string]struct{}{
 		"--config": {}, "-c": {}, "--profile": {}, "--output": {}, "-o": {},
 	}
 	for index := 0; index < len(args); index++ {
 		argument := args[index]
 		if argument == "--" {
-			return index+1 < len(args) && args[index+1] == "api"
+			return index+1 < len(args) && args[index+1] == name
 		}
 		if _, takesValue := valueFlags[argument]; takesValue {
 			index++
@@ -58,7 +62,7 @@ func isAPIInvocation(args []string) bool {
 		if strings.HasPrefix(argument, "-") {
 			continue
 		}
-		return argument == "api"
+		return argument == name
 	}
 	return false
 }

@@ -48,7 +48,7 @@ Resolve Jira-owned names and write semantics before mutating:
 - Match a transition by the exact ID, unique name, or unique destination status returned by `issue list-transitions`.
 - Resolve a Link Type with `issue link types`; preserve the outward direction from `FROM` to `--to`.
 - Use `customfield_N` directly when known. Use a human alias only after `field list --custom` or `cache refresh` proves it is unique for the current Jira Instance and Principal. Treat `stale_field_cache` as a verification risk: disclose it and verify the written field directly. Direct IDs bypass alias metadata.
-- Determine whether description or comment input is Jira Markup or Markdown Input. Jira Markup is the default; request conversion with `--input-format=markdown`.
+- Determine whether description or comment input is Jira Markup or Jiro Flavored Markdown (JFM). Jira Markup is the default; request conversion with `--input-format=jfm`. `markdown` is a permanent alias for `jfm`.
 - Use a file or `-` for stdin for long text, keeping inline and file forms mutually exclusive.
 - Resolve Sprint input as a numeric ID, `active`, or a case-insensitive name substring. Confirm that the first match in Jira board/page order is intended.
 - Treat `--component` and `--fix-version` updates as full replacements. Use the single value `none` only for an empty final field.
@@ -75,9 +75,9 @@ Use only the operation and fields requested.
 
 ```bash
 jiro issue add --project OPS --type Bug --summary "Broken deployment" \
-  --description-file issue.md --input-format=markdown --output=json
+  --description-file issue.md --input-format=jfm --output=json
 jiro issue update OPS-42 --priority High --component API --fix-version 4.5 --output=json
-jiro issue comment add OPS-42 --body-file comment.md --input-format=markdown --output=json
+jiro issue comment add OPS-42 --body-file comment.md --input-format=jfm --output=json
 jiro issue move OPS-42 --to "Start Review" --field story-points=5 --output=json
 jiro issue assign OPS-42 --assignee me --output=json
 jiro issue assign OPS-42 --assignee none --output=json
@@ -86,6 +86,8 @@ jiro issue link delete 10001 --output=json
 ```
 
 `--field key=value` decodes JSON first and otherwise uses a string; quote object and array values so the shell passes valid JSON. Use the transition proven during preflight. Delete an Issue Link by its Jira Link ID.
+
+Use the offline `jiro jfm to-jira [FILE|-]` and `jiro jfm from-jira [FILE|-]` filters when a task requires format conversion without a Jira request. They do not load Jira configuration, credentials, or network state. Text mode writes the exact converted document; use `--output=json` when structured warnings are required.
 
 Preserve partial results. A failed Sprint move can leave a newly created issue or ordinary update fields in Jira; retain the returned Issue Key and updated fields when reporting the failure.
 

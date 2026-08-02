@@ -36,6 +36,9 @@ func (a *app) configureCompletions(root *cobra.Command) {
 	}
 	mustRegisterFlagCompletion(api, "method", fixedCompletions(methodCompletions...))
 	mustRegisterFlagCompletion(api, "input", fileOrStdinCompletions)
+	for _, path := range [][]string{{"jfm", "to-jira"}, {"jfm", "from-jira"}} {
+		mustFindCommand(root, path...).ValidArgsFunction = fileOrStdinCompletions
+	}
 
 	issuesList := mustFindCommand(root, "issue", "list")
 	mustRegisterFlagCompletion(issuesList, "assignee", fixedCompletions(
@@ -97,8 +100,9 @@ func (a *app) configureCompletions(root *cobra.Command) {
 
 func inputFormatCompletions() cobra.CompletionFunc {
 	return fixedCompletions(
-		cobra.CompletionWithDesc("jira", "Jira wiki markup"),
-		cobra.CompletionWithDesc("markdown", "Convert Markdown to Jira markup"),
+		cobra.CompletionWithDesc("jira", "Jira Markup"),
+		cobra.CompletionWithDesc("jfm", "Jiro Flavored Markdown"),
+		cobra.CompletionWithDesc("markdown", "Alias for Jiro Flavored Markdown"),
 	)
 }
 

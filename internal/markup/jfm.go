@@ -1,3 +1,4 @@
+// Package markup translates between Jira Markup and Jiro Flavored Markdown.
 package markup
 
 import (

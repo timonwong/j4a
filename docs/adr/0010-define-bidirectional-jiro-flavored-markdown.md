@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0011
+---
+
 # Define bidirectional Jiro Flavored Markdown
 
 jiro defines Jiro Flavored Markdown (JFM) as a complete bidirectional format between Markdown and Jira Markup. Its normative syntax and conversion semantics live only in `docs/jiro-flavored-markdown.md`; this ADR records the implementation boundary rather than duplicating the format specification.

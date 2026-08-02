@@ -38,6 +38,7 @@ func TestSchemaDocument(t *testing.T) {
 	}
 	type commandMetadata struct {
 		auth, mutating       bool
+		args                 string
 		outputMode           string
 		supportsGlobalOutput bool
 		mutationMode         string
@@ -56,7 +57,7 @@ func TestSchemaDocument(t *testing.T) {
 			t.Fatalf("%s still exposes aliases %v", command.Name, command.Aliases)
 		}
 		commands[command.Name] = commandMetadata{
-			auth: command.Auth, mutating: command.Mutating, outputMode: command.OutputMode,
+			auth: command.Auth, mutating: command.Mutating, args: command.Args, outputMode: command.OutputMode,
 			supportsGlobalOutput: command.SupportsGlobalOutput, mutationMode: command.MutationMode,
 			readOnlyMethods: command.ReadOnlyMethods, jsonData: command.JSONData,
 		}
@@ -112,6 +113,21 @@ func TestSchemaDocument(t *testing.T) {
 	if !ok || !api.auth || !api.mutating || api.outputMode != "raw_http" || api.supportsGlobalOutput ||
 		api.mutationMode != "http_method" || strings.Join(api.readOnlyMethods, ",") != "GET,HEAD,OPTIONS" || api.jsonData != nil {
 		t.Fatalf("api schema = %+v, present=%t", api, ok)
+	}
+	for _, command := range []struct {
+		name, dataField string
+	}{
+		{"jfm to-jira", "jiraMarkup"},
+		{"jfm from-jira", "jfm"},
+	} {
+		metadata, ok := commands[command.name]
+		if !ok || metadata.auth || metadata.mutating || metadata.args != "[FILE|-]" ||
+			metadata.outputMode != "normalized" || !metadata.supportsGlobalOutput || metadata.jsonData[command.dataField] == nil {
+			t.Fatalf("%s schema = %+v, present=%t", command.name, metadata, ok)
+		}
+		if len(flags[command.name]) != 0 {
+			t.Fatalf("%s unexpectedly has command flags: %#v", command.name, flags[command.name])
+		}
 	}
 	for _, name := range []string{"method", "input", "string-field", "field", "form", "header", "timeout", "insecure", "include"} {
 		if _, ok := flags["api"][name]; !ok {
@@ -179,7 +195,7 @@ func TestSchemaDocument(t *testing.T) {
 	}
 	for _, command := range []string{"issue add", "issue update", "issue comment add"} {
 		inputFormat, ok := flags[command]["input-format"]
-		if !ok || inputFormat.kind != "enum:jira|markdown" || inputFormat.defaultValue != "jira" {
+		if !ok || inputFormat.kind != "enum:jira|jfm|markdown" || inputFormat.defaultValue != "jira" {
 			t.Fatalf("%s --input-format schema = %+v, present=%t", command, inputFormat, ok)
 		}
 	}
