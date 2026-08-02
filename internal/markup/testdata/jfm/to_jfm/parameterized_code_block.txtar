@@ -1,0 +1,10 @@
+-- input.jira --
+{code:language=javascript|title=Example|collapse=true}
+const y = 2
+{code}
+-- want.md --
+:::code{language="javascript" title="Example" collapse=true}
+const y = 2
+:::
+-- warnings.json --
+[]

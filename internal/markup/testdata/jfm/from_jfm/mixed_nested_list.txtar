@@ -1,0 +1,10 @@
+-- input.md --
+* parent
+    1) ordered child
+        + leaf
+-- want.jira --
+* parent
+*# ordered child
+*#* leaf
+-- warnings.json --
+[]

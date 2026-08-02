@@ -1,0 +1,8 @@
+-- input.md --
+![Danger](data:image/png,x)
+-- want.jira --
+!data:image/png,x|alt=Danger!
+-- warnings.json --
+[
+  {"Line":1,"Column":1,"Construct":"image","Reason":"dangerous destination scheme remains reversible through Jira Markup"}
+]

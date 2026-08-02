@@ -1,0 +1,8 @@
+-- input.md --
+    plain
+-- want.jira --
+{noformat}
+plain
+{noformat}
+-- warnings.json --
+[]

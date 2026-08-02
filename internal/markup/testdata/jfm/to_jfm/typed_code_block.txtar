@@ -1,0 +1,10 @@
+-- input.jira --
+{code:js}
+const x = 1
+{code}
+-- want.md --
+```javascript
+const x = 1
+```
+-- warnings.json --
+[]

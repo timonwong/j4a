@@ -1,0 +1,8 @@
+-- input.jira --
+!a.png|alt=One,alt=Two,width=10!
+-- want.md --
+:image[One]{src="a.png" width="10" alt="Two"}
+-- warnings.json --
+[
+  {"Line":1,"Column":16,"Construct":"directive","Reason":"duplicate image attribute is preserved"}
+]

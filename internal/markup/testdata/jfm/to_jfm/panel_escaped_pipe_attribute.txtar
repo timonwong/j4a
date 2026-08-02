@@ -1,0 +1,10 @@
+-- input.jira --
+{panel:title=A\|B}
+text
+{panel}
+-- want.md --
+:::panel{title="A|B"}
+text
+:::
+-- warnings.json --
+[]

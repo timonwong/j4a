@@ -1,0 +1,6 @@
+-- input.jira --
+[Docs|https://example.com] [https://example.com] [mailto:user@example.com] [Jump|#section] [Issue|PROJ-1]
+-- want.md --
+[Docs](https://example.com) <https://example.com> <user@example.com> [Jump](#section) :link[Issue]{target="PROJ-1"}
+-- warnings.json --
+[]

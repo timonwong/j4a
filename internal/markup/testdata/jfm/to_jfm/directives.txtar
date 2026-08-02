@@ -1,0 +1,26 @@
+-- input.jira --
+{panel:title=Data|borderStyle=dashed|bgColor=#F4F5F7}
+h1. Report
+
+|Alpha|1|
+|Beta|2|
+
+{code:language=javascript|title=Example|collapse=true}
+const x = 1
+{code}
+{panel}
+-- want.md --
+::::panel{title="Data" borderStyle="dashed" bgColor="#F4F5F7"}
+# Report
+
+:::table
+|Alpha|1|
+|Beta|2|
+:::
+
+:::code{language="javascript" title="Example" collapse=true}
+const x = 1
+:::
+::::
+-- warnings.json --
+[]

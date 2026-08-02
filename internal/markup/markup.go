@@ -1,4 +1,5 @@
-// Package markup translates explicit Markdown Input into Jira Markup.
+// Package markup translates explicit Markdown Input into Jira Markup and
+// provides bidirectional Jira Markup and Jiro Flavored Markdown conversion.
 package markup
 
 import (

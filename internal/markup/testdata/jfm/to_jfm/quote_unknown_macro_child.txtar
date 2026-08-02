@@ -1,0 +1,18 @@
+-- input.jira --
+{quote}
+before
+
+{toc}
+
+after
+{quote}
+-- want.md --
+> before
+>
+> {toc}
+>
+> after
+-- warnings.json --
+[
+  {"Line":4,"Column":1,"Construct":"blockquote","Reason":"unsupported block child inside Jira quote remains literal"}
+]

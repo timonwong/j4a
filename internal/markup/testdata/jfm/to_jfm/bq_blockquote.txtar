@@ -1,0 +1,6 @@
+-- input.jira --
+bq. one *bold* paragraph
+-- want.md --
+> one **bold** paragraph
+-- warnings.json --
+[]

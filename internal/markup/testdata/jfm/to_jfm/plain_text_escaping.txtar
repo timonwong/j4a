@@ -1,0 +1,6 @@
+-- input.jira --
+Plain C:\temp and release-note.
+-- want.md --
+Plain C:\\temp and release-note.
+-- warnings.json --
+[]

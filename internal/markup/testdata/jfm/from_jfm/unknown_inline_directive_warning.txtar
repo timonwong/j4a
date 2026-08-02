@@ -1,0 +1,8 @@
+-- input.md --
+:unknown[value]{x="1"}
+-- want.jira --
+:unknown\[value\]\{x="1"\}
+-- warnings.json --
+[
+  {"Line":1,"Column":1,"Construct":"directive","Reason":"unknown JFM directive remains literal"}
+]

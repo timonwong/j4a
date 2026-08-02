@@ -1,0 +1,8 @@
+-- input.jira --
+{color:}empty{color}
+-- want.md --
+{color:}empty{color}
+-- warnings.json --
+[
+  {"Line":1,"Column":1,"Construct":"jira-macro","Reason":"empty or malformed color macro remains literal"}
+]

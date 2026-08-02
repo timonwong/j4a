@@ -1,0 +1,9 @@
+-- input.jira --
+!a.png|future!
+-- want.md --
+!a.png|future!
+-- warnings.json --
+[
+  {"Line":1,"Column":8,"Construct":"directive","Reason":"unknown image attribute is preserved"},
+  {"Line":1,"Column":8,"Construct":"image","Reason":"Jira image parameter without a value cannot be represented by JFM; complete image remains literal"}
+]

@@ -1,0 +1,6 @@
+-- input.md --
+Run `a|b`.
+-- want.jira --
+Run {{a\|b}}.
+-- warnings.json --
+[]

@@ -1,0 +1,11 @@
+-- input.jira --
+||Name||Value||
+|Alpha|1|
+|Beta|{{2}}|
+-- want.md --
+| Name | Value |
+| --- | --- |
+| Alpha | 1 |
+| Beta | `2` |
+-- warnings.json --
+[]

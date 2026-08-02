@@ -1,0 +1,12 @@
+-- input.jira --
+{panel:title=A|future=value}
+text
+{panel}
+-- want.md --
+:::panel{title="A" future="value"}
+text
+:::
+-- warnings.json --
+[
+  {"Line":1,"Column":16,"Construct":"directive","Reason":"unknown panel attribute is preserved"}
+]

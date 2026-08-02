@@ -1,0 +1,8 @@
+-- input.md --
+[Danger](javascript:alert(1))
+-- want.jira --
+[Danger|javascript:alert(1)]
+-- warnings.json --
+[
+  {"Line":1,"Column":1,"Construct":"link","Reason":"dangerous destination scheme remains reversible through Jira Markup"}
+]

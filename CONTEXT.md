@@ -52,6 +52,10 @@ _Avoid_: Jira Markdown, wiki Markdown
 CommonMark-based text with table and strikethrough extensions that jiro converts to Jira Markup only when explicitly requested. It has no task-list, bare-autolink, malformed-input-repair, or embedded Jira Markup semantics.
 _Avoid_: Jira Markup
 
+**Jiro Flavored Markdown**:
+jiro's reversible Markdown dialect for representing Jira Markup, including jiro-owned extensions for Jira-specific semantics. Supported constructs round-trip to canonical Jira Markup; it is distinct from Markdown Input and does not claim compatibility with other Jira-oriented Markdown dialects.
+_Avoid_: Markdown Projection, Jira Flavored Markdown, Markdown Input, Jira export
+
 **Sprint**:
 A Jira Software planning interval that groups Issues for a time-bounded body of work.
 _Avoid_: Iteration, milestone

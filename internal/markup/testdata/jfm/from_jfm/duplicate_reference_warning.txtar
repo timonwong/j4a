@@ -1,0 +1,13 @@
+-- input.md --
+[Used][x]
+
+[x]: https://example.com
+[x]: https://shadow.example
+-- want.jira --
+[Used|https://example.com]
+
+\[x\]: https://shadow.example
+-- warnings.json --
+[
+  {"Line":4,"Column":1,"Construct":"reference-definition","Reason":"duplicate reference definition shadowed by an earlier definition remains literal"}
+]

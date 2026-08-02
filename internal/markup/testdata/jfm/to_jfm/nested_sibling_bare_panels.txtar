@@ -1,0 +1,26 @@
+-- input.jira --
+{panel}
+outer
+
+{panel}
+first
+{panel}
+
+{panel}
+second
+{panel}
+{panel}
+-- want.md --
+::::panel
+outer
+
+:::panel
+first
+:::
+
+:::panel
+second
+:::
+::::
+-- warnings.json --
+[]
