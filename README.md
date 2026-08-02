@@ -1,8 +1,25 @@
 # jiro
 
-`jiro` is a scriptable Jira CLI written in Go for Jira Data Center and Server.
-It uses human-readable text by default and provides versioned JSON and schema
-contracts for automation and AI agents.
+`jiro` is a Jira CLI for humans, scripts, and AI agents. It is built for Jira
+Data Center and Server, with readable text for interactive use and stable,
+versioned contracts for automation.
+
+## Features
+
+- Work with Issues, comments, links, transitions, Sprints, Projects, and Custom
+  Fields from one consistent CLI.
+- Search with focused flags or JQL, and run guarded bulk operations with dry-run
+  support and explicit confirmation.
+- Read terminal-aware tables interactively or pipe complete, headerless TSV to
+  other tools.
+- Use normalized JSON, stable exit codes, and `jiro schema` for scripts and
+  agents.
+- Keep Basic Auth and PAT Credentials in Profile-scoped OS keyring entries, with
+  read-only Profiles for safer automation.
+- Convert Markdown descriptions and comments to Jira Markup while keeping Jira
+  Markup as the explicit default.
+- Drop down to `jiro api` for authenticated raw Jira REST requests when a typed
+  command is not enough.
 
 jiro is under initial development. The v1 compatibility target is Jira Data
 Center and Server REST API v2. Jira Cloud REST API v3 and ADF are not part of
