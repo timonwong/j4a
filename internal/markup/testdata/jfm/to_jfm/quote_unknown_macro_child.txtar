@@ -14,5 +14,5 @@ after
 > after
 -- warnings.json --
 [
-  {"Line":4,"Column":1,"Construct":"blockquote","Reason":"unsupported block child inside Jira quote remains literal"}
+  {"Line":4,"Column":1,"Construct":"jira-macro","Reason":"unsupported Jira macro remains literal"}
 ]

@@ -32,15 +32,11 @@ func renderJiraMarkup(ctx context.Context, document semanticDocument) (string, e
 		case thematicBreakBlock:
 			blocks = append(blocks, "----")
 		case quoteBlock:
-			paragraphs := make([]string, 0, len(typed.Paragraphs))
-			for _, paragraph := range typed.Paragraphs {
-				content, err := renderJiraInlines(ctx, paragraph.Inlines, true)
-				if err != nil {
-					return "", err
-				}
-				paragraphs = append(paragraphs, content)
+			content, err := renderJiraMarkup(ctx, semanticDocument{Blocks: typed.Blocks})
+			if err != nil {
+				return "", err
 			}
-			blocks = append(blocks, "{quote}\n"+strings.Join(paragraphs, "\n\n")+"\n{quote}")
+			blocks = append(blocks, "{quote}\n"+content+ensureLiteralClosingSeparation(content)+"{quote}")
 		case listBlock:
 			content, err := renderJiraList(ctx, typed, "")
 			if err != nil {
@@ -245,30 +241,96 @@ func escapeJiraDelimitedValueWithContext(ctx context.Context, value, delimiters 
 }
 
 func renderJiraList(ctx context.Context, list listBlock, parentMarkers string) (string, error) {
-	marker := parentMarkers + "*"
-	if list.Ordered {
-		marker = parentMarkers + "#"
+	segments, err := renderJiraListSegments(ctx, list, parentMarkers)
+	if err != nil {
+		return "", err
 	}
+	values := make([]string, len(segments))
+	for index, segment := range segments {
+		values[index] = segment.text
+	}
+	return strings.Join(values, "\n\n"), nil
+}
+
+type jiraListRenderSegment struct {
+	text     string
+	listType byte
+}
+
+func renderJiraListSegments(ctx context.Context, list listBlock, parentMarkers string) ([]jiraListRenderSegment, error) {
+	segments := make([]jiraListRenderSegment, 0, len(list.Items))
 	lines := make([]string, 0, len(list.Items))
+	listType := byte('*')
+	if list.Ordered {
+		listType = '#'
+	}
+	appendSegment := func(segment jiraListRenderSegment) {
+		if segment.text == "" {
+			return
+		}
+		if segment.listType != 0 && len(segments) != 0 && segments[len(segments)-1].listType == segment.listType {
+			segments[len(segments)-1].text += "\n" + segment.text
+			return
+		}
+		segments = append(segments, segment)
+	}
+	flushLines := func() {
+		if len(lines) == 0 {
+			return
+		}
+		appendSegment(jiraListRenderSegment{text: strings.Join(lines, "\n"), listType: listType})
+		lines = nil
+	}
+	activeParentMarkers := parentMarkers
 	for _, item := range list.Items {
+		marker := activeParentMarkers + "*"
+		if list.Ordered {
+			marker = activeParentMarkers + "#"
+		}
 		content, err := renderJiraInlines(ctx, item.Inlines, false)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		line := marker
 		if content != "" {
 			line += " " + content
 		}
 		lines = append(lines, line)
-		for _, child := range item.Children {
-			childText, err := renderJiraList(ctx, child, marker)
-			if err != nil {
-				return "", err
+		interrupted := false
+		for _, block := range item.Blocks {
+			child, isList := block.(listBlock)
+			if isList && !interrupted && !child.RequiresFlattening {
+				childSegments, err := renderJiraListSegments(ctx, child, marker)
+				if err != nil {
+					return nil, err
+				}
+				for _, segment := range childSegments {
+					lines = append(lines, segment.text)
+				}
+				continue
 			}
-			lines = append(lines, childText)
+			flushLines()
+			interrupted = true
+			activeParentMarkers = ""
+			if isList {
+				childSegments, err := renderJiraListSegments(ctx, child, "")
+				if err != nil {
+					return nil, err
+				}
+				for _, segment := range childSegments {
+					appendSegment(segment)
+				}
+				continue
+			}
+			content, err := renderJiraMarkup(ctx, semanticDocument{Blocks: []semanticBlock{block}})
+			if err != nil {
+				return nil, err
+			}
+			appendSegment(jiraListRenderSegment{text: content})
 		}
 	}
-	return strings.Join(lines, "\n"), nil
+	flushLines()
+	return segments, nil
 }
 
 func renderJiraTable(ctx context.Context, table tableBlock) (string, error) {

@@ -1,0 +1,14 @@
+-- input.md --
+> first
+>
+> - one
+> - two **bold**
+-- want.jira --
+{quote}
+first
+
+* one
+* two *bold*
+{quote}
+-- warnings.json --
+[]

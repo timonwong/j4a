@@ -11,6 +11,10 @@ var jiraHeadingPattern = regexp.MustCompile(`^h([1-6])\.(?: (.*))?$`)
 var jiraHeadingLikePattern = regexp.MustCompile(`^h[0-9]+\.(?: |$)`)
 
 func parseJiraMarkup(ctx context.Context, source string) (semanticDocument, []conversionDiagnostic, error) {
+	return parseJiraMarkupAtQuoteDepth(ctx, source, 0)
+}
+
+func parseJiraMarkupAtQuoteDepth(ctx context.Context, source string, quoteDepth int) (semanticDocument, []conversionDiagnostic, error) {
 	lines, err := splitSourceLinesWithContext(ctx, source)
 	if err != nil {
 		return semanticDocument{}, nil, err
@@ -83,11 +87,11 @@ func parseJiraMarkup(ctx context.Context, source string) (semanticDocument, []co
 				return semanticDocument{}, nil, err
 			}
 			diagnostics = append(diagnostics, inlineDiagnostics...)
-			document.Blocks = append(document.Blocks, quoteBlock{Span: sourceSpan{Start: line.Start, End: line.End}, Paragraphs: []paragraphBlock{{Span: sourceSpan{Start: contentStart, End: line.End}, Inlines: inlines}}})
+			document.Blocks = append(document.Blocks, quoteBlock{Span: sourceSpan{Start: line.Start, End: line.End}, Blocks: []semanticBlock{paragraphBlock{Span: sourceSpan{Start: contentStart, End: line.End}, Inlines: inlines}}})
 			index++
 			continue
 		}
-		if macro, ok := parseJiraBlockMacro(ctx, source, lines, index); ok {
+		if macro, ok := parseJiraBlockMacro(ctx, source, lines, index, quoteDepth); ok {
 			if macro.Err != nil {
 				return semanticDocument{}, nil, macro.Err
 			}
@@ -96,7 +100,7 @@ func parseJiraMarkup(ctx context.Context, source string) (semanticDocument, []co
 			index = macro.Next
 			continue
 		}
-		if macro, ok := parseUnsupportedJiraBlockMacro(ctx, source, lines, index); ok {
+		if macro, ok := parseUnsupportedJiraBlockMacro(ctx, source, lines, index, quoteDepth); ok {
 			if macro.Err != nil {
 				return semanticDocument{}, nil, macro.Err
 			}

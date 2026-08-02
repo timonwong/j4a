@@ -34,3 +34,9 @@ h1. Example
 -- warnings.json --
 []
 ```
+
+## JFM specification examples
+
+Normative examples in `docs/jiro-flavored-markdown.md` are executable conformance cases. Each example has a stable `jfm-spec-example` marker, a direction, and exact `Input`, `Output`, and `Warnings` fences. Keep examples focused on format rules visible to users; parser, renderer, API, and test-harness details do not belong in the specification.
+
+Use `txtar` golden fixtures for exhaustive edge cases. A specification example and a golden may cover the same rule when the example explains a core language guarantee and the golden protects additional boundary detail.

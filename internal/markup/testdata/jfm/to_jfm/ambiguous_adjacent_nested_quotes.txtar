@@ -1,0 +1,22 @@
+-- input.jira --
+{quote}
+{quote}
+one
+{quote}
+{quote}
+two
+{quote}
+{quote}
+-- want.md --
+{quote}
+{quote}
+one
+{quote}
+{quote}
+two
+{quote}
+{quote}
+-- warnings.json --
+[
+  {"Line":1,"Column":1,"Construct":"blockquote","Reason":"adjacent nested Jira quote delimiters are ambiguous and remain literal"}
+]

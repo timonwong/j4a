@@ -1,0 +1,22 @@
+-- input.md --
+> before
+>
+> <div>
+> raw
+> </div>
+>
+> - after
+-- want.jira --
+{quote}
+before
+
+<div>
+raw
+</div>
+
+* after
+{quote}
+-- warnings.json --
+[
+  {"Line":3,"Column":3,"Construct":"directive","Reason":"unsupported Markdown block remains literal"}
+]

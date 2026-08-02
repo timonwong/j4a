@@ -1,0 +1,10 @@
+-- input.jira --
+{code:title=Example}
+:::
+{code}
+-- want.md --
+::::code{title="Example"}
+:::
+::::
+-- warnings.json --
+[]

@@ -1,0 +1,9 @@
+-- input.md --
+[before\
+after](https://e.test)
+-- want.jira --
+[before after|https://e.test]
+-- warnings.json --
+[
+  {"Line":1,"Column":1,"Construct":"link","Reason":"hard break in Markdown link label was converted to a space"}
+]

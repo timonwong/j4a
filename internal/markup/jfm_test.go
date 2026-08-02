@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,104 @@ func TestFromJFMGolden(t *testing.T) {
 		result, err := markup.FromJFM(ctx, input)
 		return result.Markup, result.Warnings, err
 	})
+}
+
+func TestJFMIsASemanticInputSupersetOfMarkdownInput(t *testing.T) {
+	t.Parallel()
+	entries, err := os.ReadDir("testdata/markdown_input")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".txtar" {
+			continue
+		}
+		entry := entry
+		t.Run(strings.TrimSuffix(entry.Name(), ".txtar"), func(t *testing.T) {
+			t.Parallel()
+			archive, err := txtar.ParseFile(filepath.Join("testdata/markdown_input", entry.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			sections := map[string]string{}
+			for _, file := range archive.Files {
+				sections[file.Name] = string(file.Data)
+			}
+			want := strings.TrimSuffix(sections["want.jira"], "\n")
+			if richer, ok := sections["want.jfm.jira"]; ok {
+				want = strings.TrimSuffix(richer, "\n")
+			}
+			result, err := markup.FromJFM(context.Background(), sections["input.md"])
+			if err != nil {
+				t.Fatalf("FromJFM() error = %v", err)
+			}
+			if result.Markup != want {
+				t.Fatalf("FromJFM() = %q, want %q", result.Markup, want)
+			}
+		})
+	}
+}
+
+func TestJFMSpecExamplesConform(t *testing.T) {
+	t.Parallel()
+	source, err := os.ReadFile("../../docs/jiro-flavored-markdown.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pattern := regexp.MustCompile(`(?ms)<!-- jfm-spec-example: ([a-z0-9-]+); direction: (jfm-to-jira|jira-to-jfm) -->\nInput:\n~~~(jfm|jira)\n(.*?)\n~~~\n\nOutput:\n~~~(jfm|jira)\n(.*?)\n~~~\n\nWarnings:\n~~~json\n(.*?)\n~~~`)
+	matches := pattern.FindAllStringSubmatch(string(source), -1)
+	markerCount := strings.Count(string(source), "<!-- jfm-spec-example:")
+	if len(matches) != markerCount {
+		t.Fatalf("parsed %d of %d specification example markers", len(matches), markerCount)
+	}
+	if len(matches) < 8 {
+		t.Fatalf("spec contains %d executable examples, want at least 8", len(matches))
+	}
+	seen := map[string]bool{}
+	for _, match := range matches {
+		name, direction := match[1], match[2]
+		inputLanguage, input := match[3], match[4]
+		outputLanguage, want := match[5], match[6]
+		if seen[name] {
+			t.Fatalf("duplicate specification example name %q", name)
+		}
+		seen[name] = true
+		wantInputLanguage, wantOutputLanguage := "jfm", "jira"
+		if direction == "jira-to-jfm" {
+			wantInputLanguage, wantOutputLanguage = "jira", "jfm"
+		}
+		if inputLanguage != wantInputLanguage || outputLanguage != wantOutputLanguage {
+			t.Fatalf("example %s direction %s uses %s input and %s output fences", name, direction, inputLanguage, outputLanguage)
+		}
+		var wantWarnings []markup.ConversionWarning
+		if err := json.Unmarshal([]byte(match[7]), &wantWarnings); err != nil {
+			t.Fatalf("example %s warnings: %v", name, err)
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			var got string
+			var gotWarnings []markup.ConversionWarning
+			if direction == "jfm-to-jira" {
+				result, err := markup.FromJFM(context.Background(), input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, gotWarnings = result.Markup, result.Warnings
+			} else {
+				result, err := markup.ToJFM(context.Background(), input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, gotWarnings = result.Markdown, result.Warnings
+			}
+			if got != want {
+				t.Fatalf("output = %q, want %q", got, want)
+			}
+			if !reflect.DeepEqual(gotWarnings, wantWarnings) {
+				t.Fatalf("warnings = %#v, want %#v", gotWarnings, wantWarnings)
+			}
+		})
+	}
 }
 
 func TestJFMConversionHonorsCancelledContextWithoutPartialResult(t *testing.T) {
@@ -223,6 +322,45 @@ func TestJFMWarningFreeCanonicalRoundTripsStabilize(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestJFMLossyComplexListStabilizesAfterFlattening(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name         string
+		input        string
+		want         string
+		warningCount int
+	}{
+		{name: "nested list after paragraph", input: "- first\n\n  second\n\n  - child", want: "* first\n\nsecond\n\n* child", warningCount: 1},
+		{name: "ordered nested item continuation", input: "1. a\n    1. b\n\n       c", want: "# a\n# b\n\nc", warningCount: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			first, err := markup.FromJFM(context.Background(), test.input)
+			if err != nil || len(first.Warnings) != test.warningCount || first.Markup != test.want {
+				t.Fatalf("first FromJFM() = %#v, %v; want Markup %q", first, err, test.want)
+			}
+			middle, err := markup.ToJFM(context.Background(), first.Markup)
+			if err != nil || len(middle.Warnings) != 0 {
+				t.Fatalf("ToJFM() = %#v, %v", middle, err)
+			}
+			last, err := markup.FromJFM(context.Background(), middle.Markdown)
+			if err != nil || len(last.Warnings) != 0 || last.Markup != first.Markup {
+				t.Fatalf("stabilized FromJFM() = %#v, %v; want Markup %q", last, err, first.Markup)
+			}
+		})
+	}
+}
+
+func TestJFMQuoteNestingBeyondSafetyLimitFallsBackWithoutFatalError(t *testing.T) {
+	t.Parallel()
+	const depth = 65
+	jfmInput := strings.Repeat("> ", depth) + "body"
+	jira, err := markup.FromJFM(context.Background(), jfmInput)
+	if err != nil || len(jira.Warnings) == 0 || jira.Warnings[0].Construct != markup.ConstructBlockquote {
+		t.Fatalf("FromJFM() = %#v, %v", jira, err)
 	}
 }
 

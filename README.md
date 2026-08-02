@@ -386,6 +386,8 @@ jiro issue add \
 
 The accepted Markdown Input dialect and its exact conversion behavior are
 documented in [`docs/markdown-input.md`](docs/markdown-input.md).
+The bidirectional Jiro Flavored Markdown format is specified independently in
+[`docs/jiro-flavored-markdown.md`](docs/jiro-flavored-markdown.md).
 
 Long text accepts inline input, a file path, or `-` for stdin. Inline and file
 forms are mutually exclusive.

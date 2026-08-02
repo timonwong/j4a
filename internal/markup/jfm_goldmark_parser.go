@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"html"
 	"regexp"
-	"strconv"
 	"strings"
 	"unicode"
 
@@ -90,22 +89,9 @@ func parseJFM(ctx context.Context, source string) (semanticDocument, []conversio
 		case *ast.CodeBlock:
 			document.Blocks = append(document.Blocks, codeBlock{Span: goldmarkNodeSpan(typed), Body: goldmarkBlockText(source, typed.Lines()), NoFormat: true})
 		case *ast.FencedCodeBlock:
-			info := ""
-			if typed.Info != nil {
-				info = string(typed.Info.Segment.Value([]byte(source)))
-			}
-			fields := strings.Fields(info)
-			if len(fields) > 1 {
-				span, raw := goldmarkFencedBlockSource(source, typed)
-				document.Blocks = append(document.Blocks, literalBlock{Span: span, Text: raw})
-				diagnostics = append(diagnostics, conversionDiagnostic{offset: span.Start, warning: ConversionWarning{Construct: ConstructCodeBlock, Reason: "fenced code info string contains unsupported metadata"}})
-				break
-			}
-			language := ""
-			if len(fields) == 1 {
-				language = normalizeCodeLanguage(fields[0])
-			}
-			document.Blocks = append(document.Blocks, codeBlock{Span: goldmarkNodeSpan(typed), Body: goldmarkBlockText(source, typed.Lines()), Language: language, NoFormat: language == ""})
+			block, blockDiagnostics := adaptGoldmarkFencedCodeBlock(source, typed)
+			document.Blocks = append(document.Blocks, block)
+			diagnostics = append(diagnostics, blockDiagnostics...)
 		case *jfmContainerDirective:
 			block, containerDiagnostics, err := adaptContainerDirective(source, typed)
 			if err != nil {
@@ -329,6 +315,10 @@ func adaptGoldmarkChildBlock(source string, node ast.Node) (semanticBlock, []con
 	case *ast.ThematicBreak:
 		return thematicBreakBlock{Span: goldmarkNodeSpan(typed)}, nil, nil
 	case *ast.Blockquote:
+		if goldmarkBlockquoteDepth(typed) > maxStructuredQuoteDepth {
+			block, warning := literalGoldmarkBlock(source, typed, ConstructBlockquote, "quote nesting exceeds the maximum structured depth and remains literal")
+			return block, []conversionDiagnostic{warning}, nil
+		}
 		block, diagnostics, err := adaptGoldmarkBlockquote(source, typed)
 		return block, diagnostics, err
 	case *ast.List:
@@ -340,25 +330,60 @@ func adaptGoldmarkChildBlock(source string, node ast.Node) (semanticBlock, []con
 	case *ast.CodeBlock:
 		return codeBlock{Span: goldmarkNodeSpan(typed), Body: goldmarkBlockText(source, typed.Lines()), NoFormat: true}, nil, nil
 	case *ast.FencedCodeBlock:
-		info := ""
-		if typed.Info != nil {
-			info = string(typed.Info.Segment.Value([]byte(source)))
-		}
-		fields := strings.Fields(info)
-		if len(fields) > 1 {
-			span, raw := goldmarkFencedBlockSource(source, typed)
-			return literalBlock{Span: span, Text: raw}, []conversionDiagnostic{{offset: span.Start, warning: ConversionWarning{Construct: ConstructCodeBlock, Reason: "fenced code info string contains unsupported metadata"}}}, nil
-		}
-		language := ""
-		if len(fields) == 1 {
-			language = normalizeCodeLanguage(fields[0])
-		}
-		return codeBlock{Span: goldmarkNodeSpan(typed), Body: goldmarkBlockText(source, typed.Lines()), Language: language, NoFormat: language == ""}, nil, nil
+		block, diagnostics := adaptGoldmarkFencedCodeBlock(source, typed)
+		return block, diagnostics, nil
 	case *jfmContainerDirective:
 		return adaptContainerDirective(source, typed)
 	default:
-		return nil, nil, fmt.Errorf("%w: unsupported Goldmark block %s", ErrConversion, node.Kind().String())
+		block, warning := literalGoldmarkChildBlock(source, node, ConstructDirective, "unsupported Markdown block remains literal")
+		return block, []conversionDiagnostic{warning}, nil
 	}
+}
+
+func literalGoldmarkChildBlock(source string, node ast.Node, construct, reason string) (literalBlock, conversionDiagnostic) {
+	span := goldmarkNodeSpan(node)
+	text := sourceSliceForInline(source, node)
+	if lines := node.Lines(); lines != nil && lines.Len() != 0 {
+		text = trimOneTrailingLineEnding(goldmarkBlockText(source, lines))
+	}
+	return literalBlock{Span: span, Text: text}, conversionDiagnostic{offset: span.Start, warning: ConversionWarning{Construct: construct, Reason: reason}}
+}
+
+func goldmarkBlockquoteDepth(node *ast.Blockquote) int {
+	depth := 1
+	for parent := node.Parent(); parent != nil; parent = parent.Parent() {
+		if _, ok := parent.(*ast.Blockquote); ok {
+			depth++
+		}
+	}
+	return depth
+}
+
+func adaptGoldmarkFencedCodeBlock(source string, node *ast.FencedCodeBlock) (codeBlock, []conversionDiagnostic) {
+	info := ""
+	if node.Info != nil {
+		info = string(node.Info.Segment.Value([]byte(source)))
+	}
+	fields := strings.Fields(info)
+	language := ""
+	metadataDiscarded := false
+	if len(fields) != 0 && !strings.Contains(fields[0], "=") {
+		language = normalizeCodeLanguage(fields[0])
+		metadataDiscarded = len(fields) > 1
+	} else if len(fields) != 0 {
+		metadataDiscarded = true
+	}
+	diagnostics := []conversionDiagnostic(nil)
+	if metadataDiscarded {
+		span, _ := goldmarkFencedBlockSource(source, node)
+		diagnostics = append(diagnostics, conversionDiagnostic{offset: span.Start, warning: ConversionWarning{Construct: ConstructCodeBlock, Reason: "fenced code info string metadata was discarded"}})
+	}
+	return codeBlock{
+		Span:     goldmarkNodeSpan(node),
+		Body:     goldmarkBlockText(source, node.Lines()),
+		Language: language,
+		NoFormat: language == "" && !metadataDiscarded,
+	}, diagnostics
 }
 
 func containerDirectiveSpan(node *jfmContainerDirective, sourceLength int) sourceSpan {
@@ -448,17 +473,12 @@ func adaptGoldmarkBlockquote(source string, node *ast.Blockquote) (quoteBlock, [
 	quote := quoteBlock{Span: goldmarkNodeSpan(node)}
 	diagnostics := make([]conversionDiagnostic, 0)
 	for child := node.FirstChild(); child != nil; child = child.NextSibling() {
-		paragraph, ok := child.(*ast.Paragraph)
-		if !ok {
-			span := goldmarkNodeSpan(child)
-			return quoteBlock{}, nil, fmt.Errorf("%w: unsupported block %s inside JFM quote at %d", ErrConversion, child.Kind().String(), span.Start)
-		}
-		inlines, inlineDiagnostics, err := adaptGoldmarkInlines(source, paragraph)
+		block, childDiagnostics, err := adaptGoldmarkChildBlock(source, child)
 		if err != nil {
 			return quoteBlock{}, nil, err
 		}
-		quote.Paragraphs = append(quote.Paragraphs, paragraphBlock{Span: goldmarkNodeSpan(paragraph), Inlines: inlines})
-		diagnostics = append(diagnostics, inlineDiagnostics...)
+		quote.Blocks = append(quote.Blocks, block)
+		diagnostics = append(diagnostics, childDiagnostics...)
 	}
 	return quote, diagnostics, nil
 }
@@ -475,42 +495,99 @@ func adaptGoldmarkList(source string, node *ast.List) (listBlock, []conversionDi
 			return listBlock{}, nil, fmt.Errorf("%w: list contains %s", ErrConversion, child.Kind().String())
 		}
 		item := listItem{Span: goldmarkNodeSpan(itemNode)}
+		flattened := false
+		tailInterrupted := false
 		for block := itemNode.FirstChild(); block != nil; block = block.NextSibling() {
 			switch typed := block.(type) {
 			case *ast.TextBlock:
 				if len(item.Inlines) != 0 {
-					return listBlock{}, nil, fmt.Errorf("%w: list item has multiple inline blocks", ErrConversion)
+					inlines, inlineDiagnostics, err := adaptGoldmarkInlines(source, typed)
+					if err != nil {
+						return listBlock{}, nil, err
+					}
+					item.Blocks = append(item.Blocks, paragraphBlock{Span: goldmarkNodeSpan(typed), Inlines: inlines})
+					diagnostics = append(diagnostics, inlineDiagnostics...)
+					flattened = true
+					tailInterrupted = true
+					continue
 				}
 				inlines, inlineDiagnostics, err := adaptGoldmarkInlines(source, typed)
 				if err != nil {
 					return listBlock{}, nil, err
 				}
-				item.Inlines = inlines
+				item.Inlines, item.Blocks, tailInterrupted = splitListItemHardBreaks(inlines, goldmarkNodeSpan(typed), item.Blocks)
+				flattened = flattened || tailInterrupted
 				diagnostics = append(diagnostics, inlineDiagnostics...)
 			case *ast.Paragraph:
 				if len(item.Inlines) != 0 {
-					return listBlock{}, nil, fmt.Errorf("%w: list item has multiple paragraphs", ErrConversion)
+					inlines, inlineDiagnostics, err := adaptGoldmarkInlines(source, typed)
+					if err != nil {
+						return listBlock{}, nil, err
+					}
+					item.Blocks = append(item.Blocks, paragraphBlock{Span: goldmarkNodeSpan(typed), Inlines: inlines})
+					diagnostics = append(diagnostics, inlineDiagnostics...)
+					flattened = true
+					tailInterrupted = true
+					continue
 				}
 				inlines, inlineDiagnostics, err := adaptGoldmarkInlines(source, typed)
 				if err != nil {
 					return listBlock{}, nil, err
 				}
-				item.Inlines = inlines
+				item.Inlines, item.Blocks, tailInterrupted = splitListItemHardBreaks(inlines, goldmarkNodeSpan(typed), item.Blocks)
+				flattened = flattened || tailInterrupted
 				diagnostics = append(diagnostics, inlineDiagnostics...)
 			case *ast.List:
 				childList, childDiagnostics, err := adaptGoldmarkList(source, typed)
 				if err != nil {
 					return listBlock{}, nil, err
 				}
-				item.Children = append(item.Children, childList)
+				item.Blocks = append(item.Blocks, childList)
+				if tailInterrupted || childList.RequiresFlattening {
+					flattened = true
+				}
 				diagnostics = append(diagnostics, childDiagnostics...)
 			default:
-				return listBlock{}, nil, fmt.Errorf("%w: unsupported block %s in JFM list item", ErrConversion, block.Kind().String())
+				continuation, continuationDiagnostics, err := adaptGoldmarkChildBlock(source, block)
+				if err != nil {
+					return listBlock{}, nil, err
+				}
+				item.Blocks = append(item.Blocks, continuation)
+				diagnostics = append(diagnostics, continuationDiagnostics...)
+				flattened = true
+				tailInterrupted = true
 			}
+		}
+		if flattened {
+			list.RequiresFlattening = true
+			itemStart := goldmarkAuthoredBlockSpan(source, itemNode).Start
+			diagnostics = append(diagnostics, conversionDiagnostic{offset: itemStart, warning: ConversionWarning{Construct: ConstructList, Reason: "list item block structure was flattened because Jira Markup cannot retain it"}})
 		}
 		list.Items = append(list.Items, item)
 	}
 	return list, diagnostics, nil
+}
+
+func splitListItemHardBreaks(inlines []semanticInline, span sourceSpan, blocks []semanticBlock) ([]semanticInline, []semanticBlock, bool) {
+	chunks := make([][]semanticInline, 1)
+	changed := false
+	for _, inline := range inlines {
+		if _, ok := inline.(hardBreakInline); ok {
+			chunks = append(chunks, nil)
+			changed = true
+			continue
+		}
+		chunks[len(chunks)-1] = append(chunks[len(chunks)-1], inline)
+	}
+	if !changed {
+		return inlines, blocks, false
+	}
+	for _, chunk := range chunks[1:] {
+		if len(chunk) != 0 {
+			blocks = append(blocks, paragraphBlock{Span: span, Inlines: chunk})
+		}
+	}
+	return chunks[0], blocks, true
 }
 
 func adaptGoldmarkTable(source string, node *extensionast.Table) (tableBlock, []conversionDiagnostic, error) {
@@ -538,9 +615,6 @@ func adaptGoldmarkTable(source string, node *extensionast.Table) (tableBlock, []
 				return tableBlock{}, nil, err
 			}
 			semanticCell := tableCell{Span: goldmarkNodeSpan(cell), Inlines: inlines}
-			if !tableCellSupportsGFM(semanticCell) {
-				return tableBlock{}, nil, fmt.Errorf("unsupported table cell content")
-			}
 			cells = append(cells, semanticCell)
 			diagnostics = append(diagnostics, inlineDiagnostics...)
 		}
@@ -635,6 +709,16 @@ func adaptGoldmarkInlines(source string, parent ast.Node) ([]semanticInline, []c
 	inlines := make([]semanticInline, 0, parent.ChildCount())
 	diagnostics := make([]conversionDiagnostic, 0)
 	for child := parent.FirstChild(); child != nil; {
+		if textNode, ok := child.(*ast.Text); ok && textNode.HardLineBreak() {
+			span := sourceSpan{Start: textNode.Segment.Start, End: textNode.Segment.Stop}
+			value := decodedMarkdownText(textNode.Segment.Value([]byte(source)), textNode.IsRaw())
+			if len(value) != 0 {
+				inlines = append(inlines, textInline{Span: span, Text: string(value)})
+			}
+			inlines = append(inlines, hardBreakInline{Span: span})
+			child = child.NextSibling()
+			continue
+		}
 		inline, inlineDiagnostics, next, err := adaptGoldmarkInline(source, child)
 		if err != nil {
 			return nil, nil, err
@@ -688,15 +772,14 @@ func adaptGoldmarkInline(source string, node ast.Node) (semanticInline, []conver
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		var hardBreakDiscarded bool
+		label, hardBreakDiscarded = replaceInlineHardBreaksWithSpaces(label)
+		if hardBreakDiscarded {
+			diagnostics = append(diagnostics, conversionDiagnostic{offset: constructStart, warning: ConversionWarning{Construct: ConstructLink, Reason: "hard break in Markdown link label was converted to a space"}})
+		}
 		target := string(decodedMarkdownText(typed.Destination, false))
 		if len(typed.Title) != 0 {
-			labelText, renderErr := renderJFMInlines(context.Background(), label, false)
-			if renderErr != nil {
-				return nil, nil, nil, renderErr
-			}
-			raw := "[" + labelText + "](" + escapeMarkdownDestinationUnchecked(target) + " " + strconv.Quote(string(decodedMarkdownText(typed.Title, false))) + ")"
-			warning := conversionDiagnostic{offset: constructStart, warning: ConversionWarning{Construct: ConstructLink, Reason: "Markdown link titles cannot be represented in Jira Markup"}}
-			return literalInline{Span: inlineNodeSpan(typed), Text: raw}, append(diagnostics, warning), next, nil
+			diagnostics = append(diagnostics, conversionDiagnostic{offset: constructStart, warning: ConversionWarning{Construct: ConstructLink, Reason: "Markdown link title was discarded because Jira Markup has no equivalent"}})
 		}
 		_, dangerous := dangerousDestinationScheme([]byte(strings.TrimLeftFunc(target, unicodeSpaceOrControl)))
 		if dangerous {
@@ -733,6 +816,26 @@ func adaptGoldmarkInline(source string, node ast.Node) (semanticInline, []conver
 		span := inlineNodeSpan(node)
 		return literalInline{Span: span, Text: sourceSliceForInline(source, node)}, []conversionDiagnostic{{offset: span.Start, warning: ConversionWarning{Construct: ConstructDirective, Reason: "unsupported Markdown inline remains literal"}}}, next, nil
 	}
+}
+
+func replaceInlineHardBreaksWithSpaces(inlines []semanticInline) ([]semanticInline, bool) {
+	result := make([]semanticInline, len(inlines))
+	changed := false
+	for index, inline := range inlines {
+		switch typed := inline.(type) {
+		case hardBreakInline:
+			result[index] = textInline{Span: typed.Span, Text: " "}
+			changed = true
+		case styledInline:
+			children, childChanged := replaceInlineHardBreaksWithSpaces(typed.Children)
+			typed.Children = children
+			result[index] = typed
+			changed = changed || childChanged
+		default:
+			result[index] = inline
+		}
+	}
+	return mergeAdjacentTextInlines(result), changed
 }
 
 func goldmarkNodeSpan(node ast.Node) sourceSpan {

@@ -1,12 +1,10 @@
 -- input.jira --
-{quote}
-intro
-
-* item
-{quote}
+{code}
+plain
+{code}
 -- want.md --
-> intro
->
-> - item
+:::code
+plain
+:::
 -- warnings.json --
 []

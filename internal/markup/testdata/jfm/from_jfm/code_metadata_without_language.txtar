@@ -1,9 +1,9 @@
 -- input.md --
-```JavaScript title=
+```title=x
 code
 ```
 -- want.jira --
-{code:language=javascript}
+{code}
 code
 {code}
 -- warnings.json --

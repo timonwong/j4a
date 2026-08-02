@@ -9,6 +9,8 @@ type semanticDocument struct {
 	Blocks []semanticBlock
 }
 
+const maxStructuredQuoteDepth = 64
+
 type semanticBlock interface {
 	semanticBlock()
 }
@@ -35,22 +37,23 @@ type thematicBreakBlock struct {
 func (thematicBreakBlock) semanticBlock() {}
 
 type quoteBlock struct {
-	Span       sourceSpan
-	Paragraphs []paragraphBlock
+	Span   sourceSpan
+	Blocks []semanticBlock
 }
 
 func (quoteBlock) semanticBlock() {}
 
 type listItem struct {
-	Span     sourceSpan
-	Inlines  []semanticInline
-	Children []listBlock
+	Span    sourceSpan
+	Inlines []semanticInline
+	Blocks  []semanticBlock
 }
 
 type listBlock struct {
-	Span    sourceSpan
-	Ordered bool
-	Items   []listItem
+	Span               sourceSpan
+	Ordered            bool
+	Items              []listItem
+	RequiresFlattening bool
 }
 
 func (listBlock) semanticBlock() {}
