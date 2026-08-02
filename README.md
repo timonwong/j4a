@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="jiro" width="410">
+</p>
+
 # jiro
 
 `jiro` is a Jira CLI for humans, scripts, and AI agents. It is built for Jira
