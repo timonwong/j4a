@@ -62,6 +62,7 @@ host = "https://alpha.example"
 		{"input format", []string{"__complete", "issue", "add", "--input-format", ""}, []string{"jira\tJira Markup", "jfm\tJiro Flavored Markdown", "markdown\tAlias for Jiro Flavored Markdown", ":4"}},
 		{"assignee", []string{"__complete", "issue", "list", "--assignee", ""}, []string{"me\tUse Jira currentUser()", ":4"}},
 		{"issue list fixed filters", []string{"__complete", "issue", "list", "--sprint", ""}, []string{"active\tOpen sprints", "open\tOpen sprints", "closed\tClosed sprints", "future\tFuture sprints", ":4"}},
+		{"sprint state", []string{"__complete", "sprint", "list", "--state", ""}, []string{"active\tActive Sprints", "closed\tClosed Sprints", "future\tFuture Sprints", "all\tAll Sprints", ":4"}},
 		{"issue list resolution", []string{"__complete", "issue", "list", "--resolution", ""}, []string{"unresolved\tIssues without a resolution", ":4"}},
 		{"issue list reporter", []string{"__complete", "issue", "list", "--reporter", ""}, []string{"me\tUse Jira currentUser()", ":4"}},
 		{"issue create sprint", []string{"__complete", "issue", "add", "--sprint", ""}, []string{"active\tOpen sprint", ":4"}},

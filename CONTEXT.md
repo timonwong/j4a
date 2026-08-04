@@ -52,6 +52,10 @@ _Avoid_: Jira Markdown, wiki Markdown
 jiro's sole Markdown-based format for representing Jira Markup bidirectionally, including jiro-owned extensions for Jira-specific semantics. Warning-free constructs round-trip canonically; recognized lossy constructs retain every target-representable semantic and report discarded information separately.
 _Avoid_: Markdown Input, Markdown Projection, Jira Flavored Markdown, Jira export
 
+**Board**:
+A Jira Software planning view whose Sprint endpoint defines one queryable relationship between that Board and each returned Sprint.
+_Avoid_: Project, Sprint container
+
 **Sprint**:
 A Jira Software planning interval that groups Issues for a time-bounded body of work.
 _Avoid_: Iteration, milestone

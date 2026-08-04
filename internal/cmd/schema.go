@@ -73,6 +73,9 @@ func schemaDocument() cliSchema {
 			flag("quiet", "", "boolean"),
 		},
 		Commands: []commandSchema{
+			commandWithFlags("board list", nil, false, "", nil, map[string]any{
+				"total": "number of Boards", "boards": []any{"Board"},
+			}),
 			commandWithFlags("cache refresh", nil, true, "", nil, object("refreshed", "path", "fieldCount", "fetchedAt", "expiresAt", "instance", "principal")),
 			normalizedCommand(commandSchema{Name: "jfm to-jira", Auth: false, Mutating: false, Args: "[FILE|-]", JSONData: object("jiraMarkup")}),
 			normalizedCommand(commandSchema{Name: "jfm from-jira", Auth: false, Mutating: false, Args: "[FILE|-]", JSONData: object("jfm")}),
@@ -144,6 +147,11 @@ func schemaDocument() cliSchema {
 			}, object("projects")),
 			commandWithFlags("project show", nil, false, "PROJECT-KEY", nil, object("id", "key", "name", "description", "projectType", "lead")),
 			commandWithFlags("field list", nil, false, "", []flagSchema{flag("custom", "", "boolean")}, object("fields")),
+			commandWithFlags("sprint list", nil, false, "", []flagSchema{
+				flag("board", "", "string"), flagDefault("state", "", "enum:active|closed|future|all", "active"),
+			}, map[string]any{
+				"total": "number of Sprint relationships", "sprints": []any{"Sprint"}, "failedBoards": []any{"FailedBoard"},
+			}),
 			normalizedCommand(commandSchema{Name: "schema", Auth: false, Mutating: false, JSONData: object("contractVersion", "program", "platform", "globalFlags", "commands", "types", "output", "exitCodes")}),
 		},
 		Types: typeDefinitions(),
@@ -190,8 +198,10 @@ func batchObject() map[string]any {
 
 func typeDefinitions() map[string]any {
 	return map[string]any{
+		"Board":         object("id", "name", "type"),
 		"Version":       object("id", "name", "archived", "released"),
-		"Sprint":        object("id", "name", "state", "boardId", "goal", "startDate", "endDate", "completeDate"),
+		"Sprint":        object("id", "name", "state", "boardId", "boardName", "originBoardId", "goal", "startDate", "endDate", "completeDate"),
+		"FailedBoard":   object("boardId", "boardName", "error"),
 		"IssueLinkType": object("id", "name", "inward", "outward"),
 		"IssueLink": map[string]any{
 			"id": "Jira Link ID", "direction": "inward|outward", "relationship": "direction-relative description",

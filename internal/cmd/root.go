@@ -133,11 +133,13 @@ func (a *app) rootCommand() *cobra.Command {
 	root.AddCommand(
 		a.apiCommand(),
 		a.authCommand(),
+		a.boardCommand(),
 		a.cacheCommand(),
 		a.jfmCommand(),
 		a.issueCommand(),
 		a.projectCommand(),
 		a.fieldCommand(),
+		a.sprintCommand(),
 		a.searchCommand(),
 		a.schemaCommand(),
 	)

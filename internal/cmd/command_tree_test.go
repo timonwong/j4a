@@ -12,12 +12,14 @@ func TestCanonicalCommandTreeUsesSingularPaths(t *testing.T) {
 
 	for _, path := range []string{
 		"api",
+		"board list",
 		"jfm to-jira",
 		"jfm from-jira",
 		"cache refresh",
 		"field list",
 		"project list",
 		"project show",
+		"sprint list",
 		"issue list",
 		"issue show",
 		"issue add",
@@ -53,6 +55,14 @@ func TestCanonicalCommandTreeUsesSingularPaths(t *testing.T) {
 		"issue transition",
 		"issue bulk-transition",
 		"issue bulk-assign",
+		"board add",
+		"board update",
+		"board delete",
+		"sprint add",
+		"sprint update",
+		"sprint delete",
+		"sprint start",
+		"sprint close",
 	} {
 		if command := exactCommand(root, path); command != nil {
 			t.Fatalf("removed command %q still exists", path)

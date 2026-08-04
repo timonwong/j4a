@@ -249,7 +249,7 @@ func normalizeSprintPage(w wireSprintPage) SprintPage {
 	sprints := make([]Sprint, len(w.Values))
 	for i, sprint := range w.Values {
 		sprints[i] = Sprint{
-			ID: sprint.ID, Name: sprint.Name, State: sprint.State, BoardID: sprint.OriginBoardID,
+			ID: sprint.ID, Name: sprint.Name, State: sprint.State, OriginBoardID: sprint.OriginBoardID,
 			Goal: sprint.Goal, StartDate: sprint.StartDate, EndDate: sprint.EndDate, CompleteDate: sprint.CompleteDate,
 		}
 	}

@@ -32,6 +32,8 @@ jiro issue show OPS-42 --output=json
 jiro issue list-transitions OPS-42 --output=json
 jiro issue link types --output=json
 jiro field list --custom --output=json
+jiro board list --output=json
+jiro sprint list --state active --output=json
 ```
 
 Prefer structured filters when they express the search and JQL when they do not:
@@ -53,6 +55,7 @@ Resolve Jira-owned names and write semantics before mutating:
 - Determine whether description or comment input is Jira Markup or Jiro Flavored Markdown (JFM). Jira Markup is the byte-preserving default; request JFM conversion with `--input-format=jfm`.
 - Use a file or `-` for stdin for long text, keeping inline and file forms mutually exclusive.
 - Resolve Sprint input as a numeric ID, `active`, or a case-insensitive name substring. Confirm that the first match in Jira board/page order is intended.
+- Use `board list` and `sprint list` only for read-only discovery. `sprint list --board SELECTOR` treats a positive number as an exact Board ID and other values as case-insensitive Board name substrings; multiple name matches are all queried. Its `--state` is `active` by default and also accepts `closed`, `future`, or `all`.
 - Treat `--component` and `--fix-version` updates as full replacements. Use the single value `none` only for an empty final field.
 
 Refresh custom-field aliases when they are stale, missing, ambiguous, or workflow-sensitive:
@@ -116,6 +119,8 @@ A zero exit code is not the completion criterion. Treat a missing field or unint
 Text is the default. Use `--output=json` for agent or script consumption. Capture normalized stdout and structured stderr separately, and read exit-code meanings from the current schema.
 
 Warnings are degraded successes and retain a successful exit status. On partial failure, preserve and report the complete normalized result from stdout and the structured error from stderr, including every succeeded, failed, and unattempted item.
+
+For cross-Board `sprint list`, do not deduplicate repeated Sprint IDs: each row is one queried Board relationship. Preserve `boardId`, `boardName`, and Jira's distinct `originBoardId`. If JSON includes `failedBoards`, report those failures together with the successful Sprint rows.
 
 Pause after permission errors, missing or ambiguous metadata, rate limiting, or uncertain output. Determine whether Jira applied the write before retrying.
 
