@@ -111,15 +111,27 @@ type BoardPage struct {
 
 // Sprint identifies a Jira Software sprint.
 type Sprint struct {
-	ID           int    `json:"id"`
-	Name         string `json:"name"`
-	State        string `json:"state"`
-	BoardID      int    `json:"boardId,omitempty"`
-	Goal         string `json:"goal,omitempty"`
-	StartDate    string `json:"startDate,omitempty"`
-	EndDate      string `json:"endDate,omitempty"`
-	CompleteDate string `json:"completeDate,omitempty"`
+	ID            int    `json:"id"`
+	Name          string `json:"name"`
+	State         string `json:"state"`
+	BoardID       int    `json:"boardId,omitempty"`
+	BoardName     string `json:"boardName,omitempty"`
+	OriginBoardID int    `json:"originBoardId,omitempty"`
+	Goal          string `json:"goal,omitempty"`
+	StartDate     string `json:"startDate,omitempty"`
+	EndDate       string `json:"endDate,omitempty"`
+	CompleteDate  string `json:"completeDate,omitempty"`
 }
+
+// SprintState is a Jira Software Sprint list state filter.
+type SprintState string
+
+const (
+	SprintStateActive SprintState = "active"
+	SprintStateClosed SprintState = "closed"
+	SprintStateFuture SprintState = "future"
+	SprintStateAll    SprintState = "all"
+)
 
 // SprintPage is a normalized page of Jira Software sprints.
 type SprintPage struct {

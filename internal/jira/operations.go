@@ -196,17 +196,76 @@ func (c *Client) ListBoards(ctx context.Context, page Page) (BoardPage, error) {
 	return normalizeBoardPage(wire), nil
 }
 
+// ListAllBoards returns every accessible Jira Software board in Jira's page
+// order.
+func (c *Client) ListAllBoards(ctx context.Context) ([]Board, error) {
+	boards := make([]Board, 0)
+	for page := (Page{}); ; {
+		result, err := c.ListBoards(ctx, page)
+		if err != nil {
+			return nil, err
+		}
+		boards = append(boards, result.Boards...)
+		if !hasNextPage(result.StartAt, len(result.Boards), result.Total, result.IsLast) {
+			return boards, nil
+		}
+		page.StartAt = result.StartAt + len(result.Boards)
+	}
+}
+
 // ListSprints returns a page of a board's Jira Software sprints in Jira's
 // source order.
 func (c *Client) ListSprints(ctx context.Context, boardID int, page Page) (SprintPage, error) {
+	return c.listSprints(ctx, boardID, page, SprintStateAll)
+}
+
+func (c *Client) listSprints(ctx context.Context, boardID int, page Page, state SprintState) (SprintPage, error) {
 	if boardID <= 0 {
 		return SprintPage{}, apperr.New(apperr.KindInvalidInput, "board ID is required")
 	}
+	query := pageQuery(page)
+	if state != SprintStateAll {
+		query.Set("state", string(state))
+	}
 	var wire wireSprintPage
-	if err := c.do(ctx, http.MethodGet, "rest/agile/1.0/board/"+strconv.Itoa(boardID)+"/sprint", pageQuery(page), nil, &wire); err != nil {
+	if err := c.do(ctx, http.MethodGet, "rest/agile/1.0/board/"+strconv.Itoa(boardID)+"/sprint", query, nil, &wire); err != nil {
 		return SprintPage{}, err
 	}
-	return normalizeSprintPage(wire), nil
+	result := normalizeSprintPage(wire)
+	for i := range result.Sprints {
+		result.Sprints[i].BoardID = boardID
+	}
+	return result, nil
+}
+
+// ParseSprintState validates and normalizes a Sprint list state.
+func ParseSprintState(value string) (SprintState, error) {
+	state := SprintState(strings.ToLower(strings.TrimSpace(value)))
+	switch state {
+	case SprintStateActive, SprintStateClosed, SprintStateFuture, SprintStateAll:
+		return state, nil
+	default:
+		return "", apperr.New(apperr.KindInvalidInput, "sprint state must be active, closed, future, or all")
+	}
+}
+
+// ListAllSprints returns every Sprint for one Board in Jira's page order.
+func (c *Client) ListAllSprints(ctx context.Context, boardID int, state SprintState) ([]Sprint, error) {
+	if _, err := ParseSprintState(string(state)); err != nil {
+		return nil, err
+	}
+	sprints := make([]Sprint, 0)
+	for page := (Page{}); ; {
+		result, err := c.listSprints(ctx, boardID, page, state)
+		if err != nil {
+			return nil, err
+		}
+		sprints = append(sprints, result.Sprints...)
+		if !hasNextPage(result.StartAt, len(result.Sprints), result.Total, result.IsLast) {
+			return sprints, nil
+		}
+		page.StartAt = result.StartAt + len(result.Sprints)
+	}
 }
 
 // ResolveSprint resolves a numeric ID, active, or case-insensitive name

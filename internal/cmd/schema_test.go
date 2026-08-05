@@ -31,7 +31,7 @@ func TestSchemaDocument(t *testing.T) {
 		document.ExitCodes["7"] != "partial failure" {
 		t.Fatalf("output contract = %+v exitCodes=%+v", document.Output, document.ExitCodes)
 	}
-	for _, name := range []string{"Version", "Sprint", "IssueLink", "IssueLinkType", "BatchResult", "BatchItem"} {
+	for _, name := range []string{"Board", "Version", "Sprint", "IssueLink", "IssueLinkType", "BatchResult", "BatchItem"} {
 		if document.Types[name] == nil {
 			t.Fatalf("schema type %s is missing: %#v", name, document.Types)
 		}
@@ -175,6 +175,8 @@ func TestSchemaDocument(t *testing.T) {
 		{"issue link types", false, nil},
 		{"issue bulk move", true, []string{"jql", "to", "field", "dry-run", "yes"}},
 		{"issue bulk assign", true, []string{"jql", "assignee", "dry-run", "yes"}},
+		{"board list", false, nil},
+		{"sprint list", false, []string{"board", "state"}},
 	} {
 		metadata, ok := commands[command.name]
 		if !ok || !metadata.auth || metadata.mutating != command.mutating {
@@ -184,6 +186,24 @@ func TestSchemaDocument(t *testing.T) {
 			if _, ok := flags[command.name][name]; !ok {
 				t.Fatalf("%s is missing --%s", command.name, name)
 			}
+		}
+	}
+	if got := flags["sprint list"]["state"]; got.kind != "enum:active|closed|future|all" || got.defaultValue != "active" {
+		t.Fatalf("sprint list --state schema = %+v", got)
+	}
+	for _, field := range []string{"total", "boards"} {
+		if commands["board list"].jsonData[field] == nil {
+			t.Fatalf("board list JSON schema is missing %q: %#v", field, commands["board list"].jsonData)
+		}
+	}
+	for _, field := range []string{"total", "sprints", "failedBoards"} {
+		if commands["sprint list"].jsonData[field] == nil {
+			t.Fatalf("sprint list JSON schema is missing %q: %#v", field, commands["sprint list"].jsonData)
+		}
+	}
+	for _, field := range []string{"boardId", "boardName", "originBoardId", "goal", "startDate", "endDate", "completeDate"} {
+		if sprintType, ok := document.Types["Sprint"].(map[string]any); !ok || sprintType[field] == nil {
+			t.Fatalf("Sprint type is missing %q: %#v", field, document.Types["Sprint"])
 		}
 	}
 	for _, command := range []string{"issue list", "issue add", "issue update"} {

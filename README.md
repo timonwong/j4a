@@ -205,6 +205,8 @@ Resource namespaces use singular canonical names without aliases:
 
 ```text
 jiro issue
+jiro board
+jiro sprint
 jiro project
 jiro field
 ```
@@ -253,6 +255,42 @@ failure.
 
 Write-time Sprint specs accept a numeric ID, `active`, or a case-insensitive
 name substring. jiro uses the first match in Jira board and page order.
+
+### Discover Boards and Sprints
+
+Boards and Sprints are read-only discovery resources:
+
+```sh
+jiro board list
+jiro sprint list
+jiro sprint list --board 12
+jiro sprint list --board platform --state future
+jiro sprint list --state all --output=json
+```
+
+`board list` fetches every accessible Board page. `sprint list` defaults to
+`--state active`; `closed` and `future` select those Jira states, while `all`
+omits the state filter. State values are case-insensitive and validated before
+the Agile API is called.
+
+Without `--board`, jiro queries every accessible Board serially. A positive
+numeric selector matches only that Board ID. Other selectors perform a
+case-insensitive Board name substring match and query every match in Jira
+order. Empty, zero, and negative selectors are invalid; an unmatched selector
+returns `not_found`.
+
+Sprint rows represent `(queried Board, Sprint)` relationships and are not
+deduplicated. JSON preserves `boardId` and `boardName` for the queried Board,
+plus Jira's `originBoardId`, `goal`, and raw date values. Text and TSV use
+`ID`, `NAME`, `STATE`, `BOARD ID`, `BOARD NAME`, `START`, `END`, and
+`COMPLETE` columns. No Board or Sprint pagination flags are exposed because
+these commands always fetch every page.
+
+If some Board Sprint requests fail, jiro continues with the remaining Boards.
+When at least one Board request succeeds, stdout preserves the successful
+Sprint rows and JSON adds `failedBoards`; stderr receives `partial_failure`
+and the process exits `7`. If every selected Board fails, jiro returns the
+ordinary classified Jira API error without an empty partial result.
 
 ### Issue Links and metadata
 
@@ -346,6 +384,8 @@ For a partial result with exit code `7`, jiro writes the complete normalized
 result to stdout before writing a structured `partial_failure` error to
 stderr. This includes a successful Issue creation whose Sprint move failed and
 bulk runs with failed or unattempted items.
+Cross-Board `sprint list` queries use the same contract: successful Sprint
+relationships remain on stdout and JSON identifies failed Boards.
 
 `jiro schema` describes automation-facing commands, flags, mutation status,
 output shapes, and exit codes as machine-readable JSON. Shell completion emits

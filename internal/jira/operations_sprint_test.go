@@ -5,8 +5,121 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
+
+func TestListAllBoardsFollowsEveryPageInJiraOrder(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/agile/1.0/board" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		switch r.URL.Query().Get("startAt") {
+		case "":
+			_, _ = w.Write([]byte(`{"startAt":0,"maxResults":2,"total":3,"values":[{"id":7,"name":"Platform","type":"scrum"},{"id":3,"name":"Operations","type":"kanban"}]}`))
+		case "2":
+			_, _ = w.Write([]byte(`{"startAt":2,"maxResults":2,"total":3,"values":[{"id":11,"name":"Release","type":"scrum"}]}`))
+		default:
+			t.Fatalf("unexpected board page = %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	boards, err := client.ListAllBoards(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Board{
+		{ID: 7, Name: "Platform", Type: "scrum"},
+		{ID: 3, Name: "Operations", Type: "kanban"},
+		{ID: 11, Name: "Release", Type: "scrum"},
+	}
+	if !reflect.DeepEqual(boards, want) {
+		t.Fatalf("ListAllBoards() = %#v, want %#v", boards, want)
+	}
+}
+
+func TestListAllSprintsFiltersStateAndPreservesQueriedAndOriginBoardIdentity(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/agile/1.0/board/12/sprint" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		if got := r.URL.Query().Get("state"); got != "active" {
+			t.Fatalf("state = %q, want active", got)
+		}
+		switch r.URL.Query().Get("startAt") {
+		case "":
+			_, _ = w.Write([]byte(`{"startAt":0,"maxResults":1,"total":2,"values":[{"id":41,"name":"Sprint 13","state":"active","originBoardId":7,"goal":"stabilize","startDate":"2026-08-01","endDate":"2026-08-14"}]}`))
+		case "1":
+			_, _ = w.Write([]byte(`{"startAt":1,"maxResults":1,"total":2,"values":[{"id":42,"name":"Sprint 14","state":"active","originBoardId":7,"goal":"ship","startDate":"2026-08-15","endDate":"2026-08-28","completeDate":"2026-08-29"}]}`))
+		default:
+			t.Fatalf("unexpected sprint page = %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sprints, err := client.ListAllSprints(context.Background(), 12, SprintStateActive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Sprint{
+		{ID: 41, Name: "Sprint 13", State: "active", BoardID: 12, OriginBoardID: 7, Goal: "stabilize", StartDate: "2026-08-01", EndDate: "2026-08-14"},
+		{ID: 42, Name: "Sprint 14", State: "active", BoardID: 12, OriginBoardID: 7, Goal: "ship", StartDate: "2026-08-15", EndDate: "2026-08-28", CompleteDate: "2026-08-29"},
+	}
+	if !reflect.DeepEqual(sprints, want) {
+		t.Fatalf("ListAllSprints() = %#v, want %#v", sprints, want)
+	}
+}
+
+func TestListAllSprintsAllOmitsStateQuery(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, present := r.URL.Query()["state"]; present {
+			t.Fatalf("state query must be omitted: %s", r.URL.String())
+		}
+		_, _ = w.Write([]byte(`{"startAt":0,"maxResults":50,"isLast":true,"values":[]}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sprints, err := client.ListAllSprints(context.Background(), 12, SprintStateAll)
+	if err != nil || len(sprints) != 0 {
+		t.Fatalf("ListAllSprints() = %#v, %v", sprints, err)
+	}
+}
+
+func TestParseSprintStateNormalizesCaseAndRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
+	for input, want := range map[string]SprintState{
+		"ACTIVE":   SprintStateActive,
+		" Closed ": SprintStateClosed,
+		"Future":   SprintStateFuture,
+		"all":      SprintStateAll,
+	} {
+		got, err := ParseSprintState(input)
+		if err != nil || got != want {
+			t.Fatalf("ParseSprintState(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	for _, input := range []string{"", "open", "active,future"} {
+		if _, err := ParseSprintState(input); err == nil {
+			t.Fatalf("ParseSprintState(%q) error = nil", input)
+		}
+	}
+}
 
 func TestMoveIssueToSprintUsesFirstNameMatchAcrossBoardAndSprintPages(t *testing.T) {
 	t.Parallel()

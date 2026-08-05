@@ -57,6 +57,13 @@ func (a *app) configureCompletions(root *cobra.Command) {
 		cobra.CompletionWithDesc("future", "Future sprints"),
 	))
 
+	mustRegisterFlagCompletion(mustFindCommand(root, "sprint", "list"), "state", fixedCompletions(
+		cobra.CompletionWithDesc("active", "Active Sprints"),
+		cobra.CompletionWithDesc("closed", "Closed Sprints"),
+		cobra.CompletionWithDesc("future", "Future Sprints"),
+		cobra.CompletionWithDesc("all", "All Sprints"),
+	))
+
 	for _, path := range [][]string{{"issue", "add"}, {"issue", "update"}} {
 		command := mustFindCommand(root, path...)
 		mustRegisterFlagCompletion(command, "input-format", inputFormatCompletions())
