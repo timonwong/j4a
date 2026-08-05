@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -14,6 +16,9 @@ func TestListAllBoardsFollowsEveryPageInJiraOrder(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rest/agile/1.0/board" {
 			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		if got := r.URL.Query().Get("maxResults"); got != "50" {
+			t.Fatalf("maxResults = %q, want 50", got)
 		}
 		switch r.URL.Query().Get("startAt") {
 		case "":
@@ -44,11 +49,97 @@ func TestListAllBoardsFollowsEveryPageInJiraOrder(t *testing.T) {
 	}
 }
 
+func TestListAllBoardsRejectsNonAdvancingPagination(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch calls.Add(1) {
+		case 1:
+			_, _ = w.Write([]byte(`{"startAt":0,"maxResults":1,"total":2,"values":[{"id":7,"name":"Platform","type":"scrum"}]}`))
+		case 2:
+			_, _ = w.Write([]byte(`{"startAt":0,"maxResults":1,"total":2,"values":[{"id":7,"name":"Platform","type":"scrum"}]}`))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	boards, err := client.ListAllBoards(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "pagination did not advance") {
+		t.Fatalf("ListAllBoards() = %#v, %v", boards, err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("calls = %d, want 2", calls.Load())
+	}
+}
+
+func TestListAllBoardsRejectsEmptyPageBeforeTotal(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("startAt") {
+		case "":
+			_, _ = w.Write([]byte(`{"startAt":0,"maxResults":1,"total":3,"values":[{"id":7,"name":"Platform","type":"scrum"}]}`))
+		case "1":
+			_, _ = w.Write([]byte(`{"startAt":1,"maxResults":1,"total":3,"isLast":false,"values":[]}`))
+		default:
+			t.Fatalf("unexpected board page = %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	boards, err := client.ListAllBoards(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "ended before completion") || boards != nil {
+		t.Fatalf("ListAllBoards() = %#v, %v", boards, err)
+	}
+}
+
+func TestListBoardsRejectsMalformedSuccessfulPage(t *testing.T) {
+	t.Parallel()
+	for name, body := range map[string]string{
+		"empty body":           "",
+		"null body":            "null",
+		"missing values":       `{}`,
+		"null values":          `{"values":null}`,
+		"invalid ID":           `{"values":[{"id":0,"name":"Broken"}]}`,
+		"non-final empty page": `{"isLast":false,"values":[]}`,
+		"premature final page": `{"total":2,"isLast":true,"values":[{"id":7,"name":"Platform"}]}`,
+		"non-final at total":   `{"total":1,"isLast":false,"values":[{"id":7,"name":"Platform"}]}`,
+		"final markers differ": `{"total":1,"isLast":true,"isLastPage":false,"values":[{"id":7,"name":"Platform"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+
+			client, err := NewClient(Config{BaseURL: server.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.ListBoards(context.Background(), Page{}); err == nil {
+				t.Fatal("ListBoards() error = nil")
+			}
+		})
+	}
+}
+
 func TestListAllSprintsFiltersStateAndPreservesQueriedAndOriginBoardIdentity(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rest/agile/1.0/board/12/sprint" {
 			t.Fatalf("request = %s %s", r.Method, r.URL.String())
+		}
+		if got := r.URL.Query().Get("maxResults"); got != "50" {
+			t.Fatalf("maxResults = %q, want 50", got)
 		}
 		if got := r.URL.Query().Get("state"); got != "active" {
 			t.Fatalf("state = %q, want active", got)
@@ -78,6 +169,122 @@ func TestListAllSprintsFiltersStateAndPreservesQueriedAndOriginBoardIdentity(t *
 	}
 	if !reflect.DeepEqual(sprints, want) {
 		t.Fatalf("ListAllSprints() = %#v, want %#v", sprints, want)
+	}
+}
+
+func TestListAllSprintsReturnsRowsFetchedBeforePageFailure(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("startAt") {
+		case "":
+			_, _ = w.Write([]byte(`{"startAt":0,"maxResults":1,"total":2,"values":[{"id":41,"name":"Sprint 13","state":"active","originBoardId":7}]}`))
+		case "1":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"errorMessages":["agile service unavailable"]}`))
+		default:
+			t.Fatalf("unexpected sprint page = %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sprints, err := client.ListAllSprints(context.Background(), 12, SprintStateActive)
+	if err == nil || !strings.Contains(err.Error(), "agile service unavailable") {
+		t.Fatalf("ListAllSprints() = %#v, %v", sprints, err)
+	}
+	want := []Sprint{{ID: 41, Name: "Sprint 13", State: "active", BoardID: 12, OriginBoardID: 7}}
+	if !reflect.DeepEqual(sprints, want) {
+		t.Fatalf("ListAllSprints() = %#v, want %#v", sprints, want)
+	}
+}
+
+func TestListAllSprintsReturnsRowsBeforeEmptyPageAheadOfTotal(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("startAt") {
+		case "":
+			_, _ = w.Write([]byte(`{"startAt":0,"maxResults":1,"total":3,"values":[{"id":41,"name":"Sprint 13","state":"active","originBoardId":7}]}`))
+		case "1":
+			_, _ = w.Write([]byte(`{"startAt":1,"maxResults":1,"total":3,"isLast":false,"values":[]}`))
+		default:
+			t.Fatalf("unexpected sprint page = %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sprints, err := client.ListAllSprints(context.Background(), 12, SprintStateActive)
+	if err == nil || !strings.Contains(err.Error(), "ended before completion") {
+		t.Fatalf("ListAllSprints() = %#v, %v", sprints, err)
+	}
+	want := []Sprint{{ID: 41, Name: "Sprint 13", State: "active", BoardID: 12, OriginBoardID: 7}}
+	if !reflect.DeepEqual(sprints, want) {
+		t.Fatalf("ListAllSprints() = %#v, want %#v", sprints, want)
+	}
+}
+
+func TestListAllSprintsRejectsPageWithoutNewRelationships(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("startAt") {
+		case "":
+			_, _ = w.Write([]byte(`{"startAt":0,"maxResults":1,"total":2,"values":[{"id":41,"name":"Sprint 13","state":"active","originBoardId":7}]}`))
+		case "1":
+			_, _ = w.Write([]byte(`{"startAt":1,"maxResults":1,"total":2,"values":[{"id":41,"name":"Sprint 13","state":"active","originBoardId":7}]}`))
+		default:
+			t.Fatalf("unexpected sprint page = %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sprints, err := client.ListAllSprints(context.Background(), 12, SprintStateActive)
+	if err == nil || !strings.Contains(err.Error(), "returned no new Sprints") {
+		t.Fatalf("ListAllSprints() = %#v, %v", sprints, err)
+	}
+	want := []Sprint{{ID: 41, Name: "Sprint 13", State: "active", BoardID: 12, OriginBoardID: 7}}
+	if !reflect.DeepEqual(sprints, want) {
+		t.Fatalf("ListAllSprints() = %#v, want %#v", sprints, want)
+	}
+}
+
+func TestListSprintsRejectsMalformedSuccessfulPage(t *testing.T) {
+	t.Parallel()
+	for name, body := range map[string]string{
+		"empty body":           "",
+		"null body":            "null",
+		"missing values":       `{}`,
+		"null values":          `{"values":null}`,
+		"invalid ID":           `{"values":[{"id":0,"name":"Broken"}]}`,
+		"non-final empty page": `{"isLast":false,"values":[]}`,
+		"premature final page": `{"total":2,"isLast":true,"values":[{"id":41,"name":"Sprint 13"}]}`,
+		"non-final at total":   `{"total":1,"isLast":false,"values":[{"id":41,"name":"Sprint 13"}]}`,
+		"final markers differ": `{"total":1,"isLast":true,"isLastPage":false,"values":[{"id":41,"name":"Sprint 13"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+
+			client, err := NewClient(Config{BaseURL: server.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.ListSprints(context.Background(), 12, Page{}); err == nil {
+				t.Fatal("ListSprints() error = nil")
+			}
+		})
 	}
 }
 

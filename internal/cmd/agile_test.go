@@ -135,7 +135,11 @@ func TestSprintListDefaultsActiveAndPreservesBoardRelationships(t *testing.T) {
 		envelope.Data.Sprints[1].ID != 42 || envelope.Data.Sprints[1].BoardID != 18 || envelope.Data.Sprints[1].BoardName != "Delivery" || envelope.Data.Sprints[1].Goal != "ship" {
 		t.Fatalf("data = %+v", envelope.Data)
 	}
-	wantRequests := []string{"/rest/agile/1.0/board", "/rest/agile/1.0/board/12/sprint?state=active", "/rest/agile/1.0/board/18/sprint?state=active"}
+	wantRequests := []string{
+		"/rest/agile/1.0/board?maxResults=50",
+		"/rest/agile/1.0/board/12/sprint?maxResults=50&state=active",
+		"/rest/agile/1.0/board/18/sprint?maxResults=50&state=active",
+	}
 	if strings.Join(requests, "\n") != strings.Join(wantRequests, "\n") {
 		t.Fatalf("requests = %v, want %v", requests, wantRequests)
 	}
@@ -386,6 +390,56 @@ func TestSprintListContinuesAndPreservesPartialResults(t *testing.T) {
 	wantRequested := "/rest/agile/1.0/board,/rest/agile/1.0/board/12/sprint,/rest/agile/1.0/board/18/sprint,/rest/agile/1.0/board/21/sprint"
 	if strings.Join(requested, ",") != wantRequested {
 		t.Fatalf("requested = %v", requested)
+	}
+}
+
+func TestSprintListPreservesRowsFetchedBeforeBoardPageFailure(t *testing.T) {
+	clearCommandEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/agile/1.0/board":
+			_, _ = io.WriteString(w, `{"startAt":0,"maxResults":50,"isLast":true,"values":[{"id":12,"name":"Platform","type":"scrum"},{"id":18,"name":"Delivery","type":"scrum"}]}`)
+		case "/rest/agile/1.0/board/12/sprint":
+			switch r.URL.Query().Get("startAt") {
+			case "":
+				_, _ = io.WriteString(w, `{"startAt":0,"maxResults":1,"total":2,"values":[{"id":41,"name":"Sprint 13","state":"active","originBoardId":7}]}`)
+			case "1":
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = io.WriteString(w, `{"errorMessages":["second page unavailable"]}`)
+			default:
+				t.Fatalf("unexpected request %s", r.URL.String())
+			}
+		case "/rest/agile/1.0/board/18/sprint":
+			_, _ = io.WriteString(w, `{"startAt":0,"maxResults":50,"isLast":true,"values":[{"id":42,"name":"Sprint 14","state":"active","originBoardId":18}]}`)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{"--config", writeCLIConfig(t, server.URL, true), "--output=json", "sprint", "list"}, strings.NewReader(""), stdout, stderr)
+	if code != 7 || !strings.Contains(stderr.String(), `"kind":"partial_failure"`) {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var envelope struct {
+		Data struct {
+			Total        int `json:"total"`
+			Sprints      []jira.Sprint
+			FailedBoards []struct {
+				BoardID int `json:"boardId"`
+			} `json:"failedBoards"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data.Total != 2 || len(envelope.Data.Sprints) != 2 || len(envelope.Data.FailedBoards) != 1 || envelope.Data.FailedBoards[0].BoardID != 12 {
+		t.Fatalf("data = %+v", envelope.Data)
+	}
+	if envelope.Data.Sprints[0].ID != 41 || envelope.Data.Sprints[0].BoardID != 12 || envelope.Data.Sprints[0].BoardName != "Platform" ||
+		envelope.Data.Sprints[1].ID != 42 || envelope.Data.Sprints[1].BoardID != 18 || envelope.Data.Sprints[1].BoardName != "Delivery" {
+		t.Fatalf("sprints = %+v", envelope.Data.Sprints)
 	}
 }
 

@@ -11,6 +11,8 @@ import (
 	"github.com/timonwong/jiro/internal/apperr"
 )
 
+const agileDiscoveryPageSize = 50
+
 // Myself returns the authenticated Jira user.
 func (c *Client) Myself(ctx context.Context) (User, error) {
 	var wire wireUser
@@ -193,19 +195,43 @@ func (c *Client) ListBoards(ctx context.Context, page Page) (BoardPage, error) {
 	if err := c.do(ctx, http.MethodGet, "rest/agile/1.0/board", pageQuery(page), nil, &wire); err != nil {
 		return BoardPage{}, err
 	}
-	return normalizeBoardPage(wire), nil
+	if wire.Values == nil {
+		return BoardPage{}, apperr.New(apperr.KindAPI, "Jira Board response is missing values")
+	}
+	result := normalizeBoardPage(wire)
+	if err := validateAgilePage("Board", page.StartAt, result.StartAt, len(result.Boards), wire.Total, wire.IsLast, wire.IsLastPage); err != nil {
+		return BoardPage{}, err
+	}
+	for _, board := range result.Boards {
+		if board.ID <= 0 {
+			return BoardPage{}, apperr.New(apperr.KindAPI, "Jira Board response contains a non-positive ID")
+		}
+	}
+	return result, nil
 }
 
 // ListAllBoards returns every accessible Jira Software board in Jira's page
 // order.
 func (c *Client) ListAllBoards(ctx context.Context) ([]Board, error) {
 	boards := make([]Board, 0)
-	for page := (Page{}); ; {
+	seen := make(map[int]struct{})
+	for page := (Page{MaxResults: agileDiscoveryPageSize}); ; {
 		result, err := c.ListBoards(ctx, page)
 		if err != nil {
 			return nil, err
 		}
-		boards = append(boards, result.Boards...)
+		added := 0
+		for _, board := range result.Boards {
+			if _, duplicate := seen[board.ID]; duplicate {
+				continue
+			}
+			seen[board.ID] = struct{}{}
+			boards = append(boards, board)
+			added++
+		}
+		if len(result.Boards) > 0 && added == 0 {
+			return nil, apperr.New(apperr.KindAPI, fmt.Sprintf("Jira Board pagination returned no new Boards at startAt %d", result.StartAt))
+		}
 		if !hasNextPage(result.StartAt, len(result.Boards), result.Total, result.IsLast) {
 			return boards, nil
 		}
@@ -231,8 +257,17 @@ func (c *Client) listSprints(ctx context.Context, boardID int, page Page, state 
 	if err := c.do(ctx, http.MethodGet, "rest/agile/1.0/board/"+strconv.Itoa(boardID)+"/sprint", query, nil, &wire); err != nil {
 		return SprintPage{}, err
 	}
+	if wire.Values == nil {
+		return SprintPage{}, apperr.New(apperr.KindAPI, "Jira Sprint response is missing values")
+	}
 	result := normalizeSprintPage(wire)
+	if err := validateAgilePage("Sprint", page.StartAt, result.StartAt, len(result.Sprints), wire.Total, wire.IsLast, wire.IsLastPage); err != nil {
+		return SprintPage{}, err
+	}
 	for i := range result.Sprints {
+		if result.Sprints[i].ID <= 0 {
+			return SprintPage{}, apperr.New(apperr.KindAPI, "Jira Sprint response contains a non-positive ID")
+		}
 		result.Sprints[i].BoardID = boardID
 	}
 	return result, nil
@@ -255,12 +290,24 @@ func (c *Client) ListAllSprints(ctx context.Context, boardID int, state SprintSt
 		return nil, err
 	}
 	sprints := make([]Sprint, 0)
-	for page := (Page{}); ; {
+	seen := make(map[int]struct{})
+	for page := (Page{MaxResults: agileDiscoveryPageSize}); ; {
 		result, err := c.listSprints(ctx, boardID, page, state)
 		if err != nil {
-			return nil, err
+			return sprints, err
 		}
-		sprints = append(sprints, result.Sprints...)
+		added := 0
+		for _, sprint := range result.Sprints {
+			if _, duplicate := seen[sprint.ID]; duplicate {
+				continue
+			}
+			seen[sprint.ID] = struct{}{}
+			sprints = append(sprints, sprint)
+			added++
+		}
+		if len(result.Sprints) > 0 && added == 0 {
+			return sprints, apperr.New(apperr.KindAPI, fmt.Sprintf("Jira Sprint pagination returned no new Sprints at startAt %d", result.StartAt))
+		}
 		if !hasNextPage(result.StartAt, len(result.Sprints), result.Total, result.IsLast) {
 			return sprints, nil
 		}
@@ -314,13 +361,13 @@ func (c *Client) resolveSprint(ctx context.Context, spec string) (Sprint, error)
 	}
 	active := strings.EqualFold(spec, "active")
 	needle := strings.ToLower(spec)
-	for boardPage := (Page{}); ; {
+	for boardPage := (Page{MaxResults: agileDiscoveryPageSize}); ; {
 		boards, err := c.ListBoards(ctx, boardPage)
 		if err != nil {
 			return Sprint{}, err
 		}
 		for _, board := range boards.Boards {
-			for sprintPage := (Page{}); ; {
+			for sprintPage := (Page{MaxResults: agileDiscoveryPageSize}); ; {
 				sprints, err := c.ListSprints(ctx, board.ID, sprintPage)
 				if err != nil {
 					return Sprint{}, err
@@ -349,6 +396,44 @@ func hasNextPage(startAt, count, total int, isLast bool) bool {
 		return false
 	}
 	return total == 0 || startAt+count < total
+}
+
+func validateAgilePage(resource string, requestedStartAt, receivedStartAt, count int, total *int, isLast, isLastPage *bool) error {
+	if receivedStartAt != requestedStartAt {
+		return apperr.New(apperr.KindAPI, fmt.Sprintf(
+			"Jira %s pagination did not advance: requested startAt %d, received %d",
+			resource, requestedStartAt, receivedStartAt,
+		))
+	}
+	if receivedStartAt < 0 || count < 0 || (total != nil && *total < 0) {
+		return apperr.New(apperr.KindAPI, fmt.Sprintf("Jira %s pagination contains a negative value", resource))
+	}
+	if isLast != nil && isLastPage != nil && *isLast != *isLastPage {
+		return apperr.New(apperr.KindAPI, fmt.Sprintf("Jira %s pagination final-page markers disagree", resource))
+	}
+	explicitlyNonFinal := (isLast != nil && !*isLast) || (isLastPage != nil && !*isLastPage)
+	explicitlyFinal := boolPointerValue(isLast) || boolPointerValue(isLastPage)
+	end := receivedStartAt + count
+	if total != nil {
+		if end > *total || (explicitlyFinal && end < *total) || (explicitlyNonFinal && end >= *total) {
+			return apperr.New(apperr.KindAPI, fmt.Sprintf(
+				"Jira %s pagination metadata is inconsistent: startAt %d, count %d, total %d",
+				resource, receivedStartAt, count, *total,
+			))
+		}
+	}
+	completeByTotal := total != nil && *total <= receivedStartAt
+	if count == 0 && (explicitlyNonFinal || (!explicitlyFinal && !completeByTotal)) {
+		totalValue := "omitted"
+		if total != nil {
+			totalValue = strconv.Itoa(*total)
+		}
+		return apperr.New(apperr.KindAPI, fmt.Sprintf(
+			"Jira %s pagination ended before completion: startAt %d, total %s",
+			resource, receivedStartAt, totalValue,
+		))
+	}
+	return nil
 }
 
 // ListComments returns comments on an issue.
