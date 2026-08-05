@@ -108,18 +108,24 @@ func (a *app) sprintListCommand() *cobra.Command {
 			var firstErr error
 			for _, board := range boards {
 				listed, err := client.ListAllSprints(command.Context(), board.ID, state)
-				if err != nil {
-					if firstErr == nil {
-						firstErr = err
-					}
-					failures = append(failures, sprintBoardFailure{BoardID: board.ID, BoardName: board.Name, Error: err.Error()})
-					continue
-				}
-				successfulBoards++
 				for i := range listed {
 					listed[i].BoardName = board.Name
 				}
 				sprints = append(sprints, listed...)
+				if err != nil {
+					if command.Context().Err() != nil {
+						return command.Context().Err()
+					}
+					if firstErr == nil {
+						firstErr = err
+					}
+					failures = append(failures, sprintBoardFailure{BoardID: board.ID, BoardName: board.Name, Error: err.Error()})
+					if len(listed) > 0 {
+						successfulBoards++
+					}
+					continue
+				}
+				successfulBoards++
 			}
 			result := sprintListResult{Total: len(sprints), Sprints: sprints, FailedBoards: failures}
 			if len(failures) == 0 {

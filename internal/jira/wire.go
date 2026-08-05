@@ -65,9 +65,9 @@ type wireBoard struct {
 type wireBoardPage struct {
 	StartAt    int         `json:"startAt"`
 	MaxResults int         `json:"maxResults"`
-	Total      int         `json:"total"`
-	IsLast     bool        `json:"isLast"`
-	IsLastPage bool        `json:"isLastPage"`
+	Total      *int        `json:"total"`
+	IsLast     *bool       `json:"isLast"`
+	IsLastPage *bool       `json:"isLastPage"`
 	Values     []wireBoard `json:"values"`
 }
 
@@ -85,9 +85,9 @@ type wireSprint struct {
 type wireSprintPage struct {
 	StartAt    int          `json:"startAt"`
 	MaxResults int          `json:"maxResults"`
-	Total      int          `json:"total"`
-	IsLast     bool         `json:"isLast"`
-	IsLastPage bool         `json:"isLastPage"`
+	Total      *int         `json:"total"`
+	IsLast     *bool        `json:"isLast"`
+	IsLastPage *bool        `json:"isLastPage"`
 	Values     []wireSprint `json:"values"`
 }
 
@@ -242,7 +242,7 @@ func normalizeBoardPage(w wireBoardPage) BoardPage {
 	for i, board := range w.Values {
 		boards[i] = Board{ID: board.ID, Name: board.Name, Type: board.Type}
 	}
-	return BoardPage{StartAt: w.StartAt, MaxResults: w.MaxResults, Total: w.Total, IsLast: w.IsLast || w.IsLastPage, Boards: boards}
+	return BoardPage{StartAt: w.StartAt, MaxResults: w.MaxResults, Total: intValue(w.Total), IsLast: boolPointerValue(w.IsLast) || boolPointerValue(w.IsLastPage), Boards: boards}
 }
 
 func normalizeSprintPage(w wireSprintPage) SprintPage {
@@ -253,7 +253,18 @@ func normalizeSprintPage(w wireSprintPage) SprintPage {
 			Goal: sprint.Goal, StartDate: sprint.StartDate, EndDate: sprint.EndDate, CompleteDate: sprint.CompleteDate,
 		}
 	}
-	return SprintPage{StartAt: w.StartAt, MaxResults: w.MaxResults, Total: w.Total, IsLast: w.IsLast || w.IsLastPage, Sprints: sprints}
+	return SprintPage{StartAt: w.StartAt, MaxResults: w.MaxResults, Total: intValue(w.Total), IsLast: boolPointerValue(w.IsLast) || boolPointerValue(w.IsLastPage), Sprints: sprints}
+}
+
+func intValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func boolPointerValue(value *bool) bool {
+	return value != nil && *value
 }
 
 func normalizeIssueLinks(value any) []IssueLink {
