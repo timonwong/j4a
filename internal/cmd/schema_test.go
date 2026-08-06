@@ -167,13 +167,13 @@ func TestSchemaDocument(t *testing.T) {
 		{"issue list", false, []string{"resolution", "reporter", "label", "component", "fix-version", "sprint", "parent", "created", "updated"}},
 		{"issue add", true, []string{"parent", "component", "fix-version", "sprint"}},
 		{"issue update", true, []string{"component", "fix-version", "sprint"}},
-		{"issue move", true, []string{"to"}},
+		{"issue move", true, []string{"to", "comment", "input-format", "resolution", "field"}},
 		{"issue assign", true, []string{"assignee"}},
 		{"issue link list", false, nil},
 		{"issue link add", true, []string{"to", "type"}},
 		{"issue link delete", true, nil},
 		{"issue link types", false, nil},
-		{"issue bulk move", true, []string{"jql", "to", "field", "dry-run", "yes"}},
+		{"issue bulk move", true, []string{"jql", "to", "resolution", "field", "dry-run", "yes"}},
 		{"issue bulk assign", true, []string{"jql", "assignee", "dry-run", "yes"}},
 		{"board list", false, nil},
 		{"sprint list", false, []string{"board", "state"}},
@@ -187,6 +187,22 @@ func TestSchemaDocument(t *testing.T) {
 				t.Fatalf("%s is missing --%s", command.name, name)
 			}
 		}
+	}
+	for _, name := range []string{"issue add", "issue update", "issue move", "issue bulk move"} {
+		if got := flags[name]["field"].kind; got != "custom-field-alias-or-id=value" {
+			t.Fatalf("%s --field type = %q", name, got)
+		}
+	}
+	if got := flags["issue move"]["input-format"]; got.kind != "enum:jira|jfm|markdown" || got.defaultValue != "jira" {
+		t.Fatalf("issue move --input-format schema = %+v", got)
+	}
+	for _, field := range []string{"commented", "resolution"} {
+		if commands["issue move"].jsonData[field] == nil {
+			t.Fatalf("issue move JSON schema is missing %q: %#v", field, commands["issue move"].jsonData)
+		}
+	}
+	if target, ok := document.Types["BatchTarget"].(map[string]any); !ok || target["resolution"] == nil {
+		t.Fatalf("BatchTarget schema is missing resolution: %#v", document.Types["BatchTarget"])
 	}
 	if got := flags["sprint list"]["state"]; got.kind != "enum:active|closed|future|all" || got.defaultValue != "active" {
 		t.Fatalf("sprint list --state schema = %+v", got)

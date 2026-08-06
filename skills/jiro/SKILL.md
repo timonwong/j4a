@@ -53,7 +53,8 @@ Resolve Jira-owned names and write semantics before mutating:
 - Resolve a Link Type with `issue link types`; preserve the outward direction from `FROM` to `--to`.
 - Use `customfield_N` directly when known. Use a human alias only after `field list --custom` or `cache refresh` proves it is unique for the current Jira Instance and Principal. Treat `stale_field_cache` as a verification risk: disclose it and verify the written field directly. Direct IDs bypass alias metadata.
 - Determine whether description or comment input is Jira Markup or Jiro Flavored Markdown (JFM). Jira Markup is the byte-preserving default; request JFM conversion with `--input-format=jfm`.
-- Use a file or `-` for stdin for long text, keeping inline and file forms mutually exclusive.
+- Use a file or `-` for stdin for long descriptions and `issue comment add`, keeping inline and file forms mutually exclusive. `issue move --comment` is inline-only.
+- For `issue move --resolution`, use a resolution name, numeric ID, or `none` to clear. Do not pass system fields such as `resolution` through `--field`.
 - Resolve Sprint input as a numeric ID, `active`, or a case-insensitive name substring. Confirm that the first match in Jira board/page order is intended.
 - Use `board list` and `sprint list` only for read-only discovery. `sprint list --board SELECTOR` treats a positive number as an exact Board ID and other values as case-insensitive Board name substrings; multiple name matches are all queried. Its `--state` is `active` by default and also accepts `closed`, `future`, or `all`.
 - Treat `--component` and `--fix-version` updates as full replacements. Use the single value `none` only for an empty final field.
@@ -68,11 +69,12 @@ jiro field list --custom --output=json
 For bulk changes, preflight the complete JQL selection without changing Jira:
 
 ```bash
-jiro issue bulk move --jql 'project = OPS AND status = Open' --to "In Progress" --dry-run --output=json
+jiro issue bulk move --jql 'project = OPS AND status = Open' --to Done \
+  --resolution Fixed --dry-run --output=json
 jiro issue bulk assign --jql 'project = OPS' --assignee me --dry-run --output=json
 ```
 
-Review every returned item. Proceed only when the selection, targets, `ready` count, and failures match the intended scope.
+Review every returned item. Proceed only when the selection, targets, `ready` count, and failures match the intended scope. Bulk move dry-run proves transition availability but does not ask Jira to validate custom fields or resolution; field validation occurs during `--yes` execution.
 
 ## Mutate
 
@@ -83,21 +85,23 @@ jiro issue add --project OPS --type Bug --summary "Broken deployment" \
   --description-file issue.md --input-format=jfm --output=json
 jiro issue update OPS-42 --priority High --component API --fix-version 4.5 --output=json
 jiro issue comment add OPS-42 --body-file comment.md --input-format=jfm --output=json
-jiro issue move OPS-42 --to "Start Review" --field story-points=5 --output=json
+jiro issue move OPS-42 --to Done --comment "**Verified** in staging." \
+  --input-format=jfm --resolution Fixed --field story-points=5 --output=json
 jiro issue assign OPS-42 --assignee me --output=json
 jiro issue assign OPS-42 --assignee none --output=json
 jiro issue link add OPS-42 --to OPS-99 --type Blocks --output=json
 jiro issue link delete 10001 --output=json
 ```
 
-`--field key=value` decodes JSON first and otherwise uses a string; quote object and array values so the shell passes valid JSON. Use the transition proven during preflight. Delete an Issue Link by its Jira Link ID.
+Typed-command `--field key=value` accepts only a Custom Field ID or Custom Field Alias, decodes JSON first, and otherwise uses a string; quote object and array values so the shell passes valid JSON. Use dedicated flags for system fields. `issue move` sends its transition, comment, resolution, and custom fields in one Jira transition request; it never falls back to a later comment request. Use the transition proven during preflight. Delete an Issue Link by its Jira Link ID.
 
 Preserve partial results. A failed Sprint move can leave a newly created issue or ordinary update fields in Jira; retain the returned Issue Key and updated fields when reporting the failure.
 
 After the user authorizes a preflighted broad write, repeat the same JQL and target with `--yes`:
 
 ```bash
-jiro issue bulk move --jql 'project = OPS AND status = Open' --to "In Progress" --yes --output=json
+jiro issue bulk move --jql 'project = OPS AND status = Open' --to Done \
+  --resolution Fixed --yes --output=json
 jiro issue bulk assign --jql 'project = OPS' --assignee me --yes --output=json
 ```
 

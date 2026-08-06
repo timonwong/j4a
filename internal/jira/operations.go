@@ -510,9 +510,17 @@ func (c *Client) Transition(ctx context.Context, key string, input TransitionInp
 	if strings.TrimSpace(key) == "" || strings.TrimSpace(input.ID) == "" {
 		return apperr.New(apperr.KindInvalidInput, "issue key and transition ID are required")
 	}
+	if input.Comment != nil && strings.TrimSpace(*input.Comment) == "" {
+		return apperr.New(apperr.KindInvalidInput, "transition comment must not be empty")
+	}
 	payload := map[string]any{"transition": map[string]string{"id": input.ID}}
 	if len(input.Fields) > 0 {
 		payload["fields"] = input.Fields
+	}
+	if input.Comment != nil {
+		payload["update"] = map[string]any{
+			"comment": []map[string]any{{"add": map[string]string{"body": *input.Comment}}},
+		}
 	}
 	return c.do(ctx, http.MethodPost, "rest/api/2/issue/"+url.PathEscape(key)+"/transitions", nil, payload, nil)
 }

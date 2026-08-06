@@ -240,7 +240,8 @@ jiro issue add --project OPS --type Bug --summary "Broken deployment" \
 jiro issue update OPS-42 --priority High --component API --fix-version 4.5
 jiro issue update OPS-42 --component none --sprint active
 jiro issue comment add OPS-42 --body "Deployed to staging."
-jiro issue move OPS-42 --to "In Review"
+jiro issue move OPS-42 --to Done --comment "**Verified** in staging." \
+  --input-format=jfm --resolution Fixed
 jiro issue assign OPS-42 --assignee me
 ```
 
@@ -255,6 +256,14 @@ failure.
 
 Write-time Sprint specs accept a numeric ID, `active`, or a case-insensitive
 name substring. jiro uses the first match in Jira board and page order.
+
+`issue move --comment` adds a non-empty inline comment through the same Jira
+transition request. It accepts Jira Markup by default, or JFM through
+`--input-format=jfm`; `--input-format` without `--comment` is invalid.
+`--resolution` accepts a resolution name, a numeric Jira resolution ID, or
+`none` to clear it. The transition, comment, resolution, and custom fields are
+submitted atomically: Jira rejects the complete request when its workflow does
+not accept one of them. jiro does not fall back to a separate comment request.
 
 ### Discover Boards and Sprints
 
@@ -313,9 +322,16 @@ Bulk operations select Issues with JQL. Exactly one of `--dry-run` and
 all matches by default.
 
 ```sh
-jiro issue bulk move --jql 'project = OPS AND status = Open' --to "In Progress" --dry-run
+jiro issue bulk move --jql 'project = OPS AND status = Open' --to Done \
+  --resolution Fixed --dry-run
 jiro issue bulk assign --jql 'project = OPS' --assignee me --yes
 ```
+
+`issue bulk move --resolution` uses the same name, numeric ID, and `none`
+forms as single-Issue move. A dry-run proves transition availability and shows
+the requested resolution, but Jira validates transition fields only during
+`--yes` execution. A per-Issue validation error fails that item and processing
+continues; systemic errors stop the remaining writes.
 
 ## Automation and output
 
@@ -395,7 +411,8 @@ shell code and is outside that contract.
 
 ### Custom fields
 
-Pass custom fields with repeatable `--field key=value` flags:
+Typed Issue mutations accept only custom fields through repeatable
+`--field key=value` flags:
 
 ```sh
 jiro issue add \
@@ -413,6 +430,9 @@ A Custom Field Alias such as `story-points` is resolved through a 24-hour Field
 Metadata Snapshot. The snapshot is scoped to the normalized Jira base URL and
 the Principal returned by `/myself`. Missing or ambiguous aliases are errors.
 Values are decoded as JSON first and fall back to strings.
+System fields are not accepted through typed-command `--field`; use their
+dedicated flags, such as `--resolution`, instead. The raw `jiro api --field`
+request builder is a separate contract and is not subject to this restriction.
 
 The disposable JSON snapshots live under `github.com/adrg/xdg`'s
 `xdg.CacheHome` at:
@@ -455,8 +475,9 @@ jiro issue add \
 The bidirectional format and its exact conversion behavior are specified in
 [`docs/jiro-flavored-markdown.md`](docs/jiro-flavored-markdown.md).
 
-Long text accepts inline input, a file path, or `-` for stdin. Inline and file
-forms are mutually exclusive.
+Issue descriptions and `issue comment add` accept inline input, a file path,
+or `-` for stdin; inline and file forms are mutually exclusive. The atomic
+transition comment on `issue move --comment` is inline-only.
 
 Convert documents locally without loading Jira configuration or credentials:
 

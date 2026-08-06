@@ -47,7 +47,7 @@ func TestBulkTransitionDryRunPreflightsEveryJQLPage(t *testing.T) {
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	code := Execute([]string{
 		"--config", writeCLIConfig(t, server.URL, true), "-ojson", "issue", "bulk", "move",
-		"--jql", "project = OPS", "--to", "Done", "--dry-run",
+		"--jql", "project = OPS", "--to", "Done", "--resolution", "Fixed", "--dry-run",
 	}, strings.NewReader(""), stdout, stderr)
 	if code != 7 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -63,6 +63,9 @@ func TestBulkTransitionDryRunPreflightsEveryJQLPage(t *testing.T) {
 			Items        []struct {
 				IssueKey string `json:"issueKey"`
 				Outcome  string `json:"outcome"`
+				Target   struct {
+					Resolution string `json:"resolution"`
+				} `json:"target"`
 			} `json:"items"`
 		} `json:"data"`
 	}
@@ -72,7 +75,9 @@ func TestBulkTransitionDryRunPreflightsEveryJQLPage(t *testing.T) {
 	if envelope.Data.Operation != "transition" || !envelope.Data.DryRun || envelope.Data.Total != 2 || envelope.Data.Ready != 1 || envelope.Data.Failed != 1 || envelope.Data.NotAttempted != 0 {
 		t.Fatalf("data = %+v", envelope.Data)
 	}
-	if len(envelope.Data.Items) != 2 || envelope.Data.Items[0].IssueKey != "OPS-1" || envelope.Data.Items[0].Outcome != "ready" || envelope.Data.Items[1].Outcome != "failed" {
+	if len(envelope.Data.Items) != 2 || envelope.Data.Items[0].IssueKey != "OPS-1" || envelope.Data.Items[0].Outcome != "ready" ||
+		envelope.Data.Items[0].Target.Resolution != "Fixed" || envelope.Data.Items[1].Outcome != "failed" ||
+		envelope.Data.Items[1].Target.Resolution != "Fixed" {
 		t.Fatalf("items = %+v", envelope.Data.Items)
 	}
 	if !strings.Contains(stderr.String(), `"kind":"partial_failure"`) {
@@ -136,6 +141,71 @@ func TestBulkTransitionStopsOnSystemicFailureAndMarksRemaining(t *testing.T) {
 		if strings.Contains(request, "OPS-3/transitions") {
 			t.Fatalf("OPS-3 should not have been attempted: %v", requests)
 		}
+	}
+}
+
+func TestBulkTransitionResolutionContinuesAfterIssueValidationFailure(t *testing.T) {
+	clearCommandEnv(t)
+	postOrder := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/rest/api/2/search":
+			_, _ = io.WriteString(writer, `{"startAt":0,"maxResults":50,"total":2,"issues":[{"id":"1","key":"OPS-1","fields":{"status":{"name":"Open"}}},{"id":"2","key":"OPS-2","fields":{"status":{"name":"Open"}}}]}`)
+		case "/rest/api/2/issue/OPS-1/transitions", "/rest/api/2/issue/OPS-2/transitions":
+			if request.Method == http.MethodGet {
+				_, _ = io.WriteString(writer, `{"transitions":[{"id":"31","name":"Finish","to":{"id":"3","name":"Done"}}]}`)
+				return
+			}
+			postOrder = append(postOrder, request.URL.Path)
+			var payload struct {
+				Fields map[string]any `json:"fields"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			resolution, ok := payload.Fields["resolution"].(map[string]any)
+			if !ok || resolution["id"] != "10104" {
+				t.Fatalf("payload = %#v", payload)
+			}
+			if request.URL.Path == "/rest/api/2/issue/OPS-1/transitions" {
+				writer.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(writer, `{"errors":{"resolution":"not allowed"}}`)
+				return
+			}
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	code := Execute([]string{
+		"--config", writeCLIConfig(t, server.URL, false), "-ojson", "issue", "bulk", "move",
+		"--jql", "project = OPS", "--to", "Done", "--resolution", "10104", "--yes",
+	}, strings.NewReader(""), stdout, stderr)
+	if code != 7 || len(postOrder) != 2 {
+		t.Fatalf("code=%d postOrder=%v stdout=%s stderr=%s", code, postOrder, stdout.String(), stderr.String())
+	}
+	var envelope struct {
+		Data struct {
+			Succeeded int `json:"succeeded"`
+			Failed    int `json:"failed"`
+			Items     []struct {
+				Outcome string `json:"outcome"`
+				Target  struct {
+					Resolution string `json:"resolution"`
+				} `json:"target"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data.Succeeded != 1 || envelope.Data.Failed != 1 || len(envelope.Data.Items) != 2 ||
+		envelope.Data.Items[0].Outcome != "failed" || envelope.Data.Items[1].Outcome != "succeeded" ||
+		envelope.Data.Items[0].Target.Resolution != "10104" || envelope.Data.Items[1].Target.Resolution != "10104" {
+		t.Fatalf("data = %+v", envelope.Data)
 	}
 }
 

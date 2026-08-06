@@ -198,7 +198,7 @@ func (a *app) issueCreateCommand() *cobra.Command {
 	flags.StringSliceVar(&components, "component", nil, "component name; repeatable")
 	flags.StringSliceVar(&fixVersions, "fix-version", nil, "fix version name; repeatable")
 	flags.StringVar(&sprint, "sprint", "", "sprint ID, name substring, or active")
-	flags.StringArrayVar(&fields, "field", nil, "custom field as key=value; repeatable")
+	flags.StringArrayVar(&fields, "field", nil, "custom field as alias=value or customfield_N=value; repeatable")
 	return command
 }
 
@@ -284,7 +284,7 @@ func (a *app) issueUpdateCommand() *cobra.Command {
 	flags.StringSliceVar(&components, "component", nil, "replacement component names; use a single none to clear")
 	flags.StringSliceVar(&fixVersions, "fix-version", nil, "replacement fix version names; use a single none to clear")
 	flags.StringVar(&sprint, "sprint", "", "sprint ID, name substring, or active")
-	flags.StringArrayVar(&fields, "field", nil, "custom field as key=value; repeatable")
+	flags.StringArrayVar(&fields, "field", nil, "custom field as alias=value or customfield_N=value; repeatable")
 	return command
 }
 
@@ -397,7 +397,7 @@ func (a *app) issueTransitionsCommand() *cobra.Command {
 }
 
 func (a *app) issueTransitionCommand() *cobra.Command {
-	var target string
+	var target, comment, inputFormat, resolution string
 	var fields []string
 	command := &cobra.Command{
 		Use:   "move ISSUE-KEY",
@@ -406,6 +406,29 @@ func (a *app) issueTransitionCommand() *cobra.Command {
 		RunE: func(command *cobra.Command, args []string) error {
 			if strings.TrimSpace(target) == "" {
 				return apperr.New(apperr.KindInvalidInput, "--to is required")
+			}
+			commentChanged := command.Flags().Changed("comment")
+			if command.Flags().Changed("input-format") && !commentChanged {
+				return apperr.New(apperr.KindInvalidInput, "--input-format requires --comment")
+			}
+			var commentValue *string
+			if commentChanged {
+				if strings.TrimSpace(comment) == "" {
+					return apperr.New(apperr.KindInvalidInput, "--comment must not be empty")
+				}
+				format, err := parseInputFormat(inputFormat)
+				if err != nil {
+					return err
+				}
+				commentValue = &comment
+				commentValue, err = a.convertToJiraMarkup(command.Context(), commentValue, format, "comment")
+				if err != nil {
+					return err
+				}
+			}
+			resolutionValue, err := parseResolutionOption(resolution, command.Flags().Changed("resolution"))
+			if err != nil {
+				return err
 			}
 			client, settings, err := a.writableClient()
 			if err != nil {
@@ -423,16 +446,28 @@ func (a *app) issueTransitionCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			input := jira.TransitionInput{ID: transition.ID, Fields: resolvedFields}
+			if resolutionValue != nil {
+				resolvedFields["resolution"] = resolutionValue.fieldValue
+			}
+			input := jira.TransitionInput{ID: transition.ID, Fields: resolvedFields, Comment: commentValue}
 			if err := client.Transition(command.Context(), args[0], input); err != nil {
 				return err
 			}
-			result := map[string]any{"key": args[0], "transition": transition, "transitioned": true}
+			result := map[string]any{
+				"key": args[0], "transition": transition, "transitioned": true, "commented": commentChanged,
+			}
+			if resolutionValue != nil {
+				result["resolution"] = resolutionValue.output
+			}
 			return a.renderMessage(result, fmt.Sprintf("Transitioned %s to %s", args[0], transition.Name))
 		},
 	}
-	command.Flags().StringVar(&target, "to", "", "transition ID or name")
-	command.Flags().StringArrayVar(&fields, "field", nil, "transition field as key=value; repeatable")
+	flags := command.Flags()
+	flags.StringVar(&target, "to", "", "transition ID or name")
+	flags.StringVar(&comment, "comment", "", "comment added by the transition")
+	flags.StringVar(&inputFormat, "input-format", "jira", "comment input format: jira, jfm, or markdown")
+	flags.StringVar(&resolution, "resolution", "", "resolution name or numeric ID; use none to clear")
+	flags.StringArrayVar(&fields, "field", nil, "custom field as alias=value or customfield_N=value; repeatable")
 	return command
 }
 

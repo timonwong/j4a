@@ -17,7 +17,12 @@ import (
 
 var directCustomFieldID = regexp.MustCompile(`^customfield_[0-9]+$`)
 var jqlRelativeDate = regexp.MustCompile(`^[+-][0-9]+[wdhm](?:\s+[0-9]+[wdhm])*$`)
-var jqlSprintID = regexp.MustCompile(`^[0-9]+$`)
+var numericJiraID = regexp.MustCompile(`^[0-9]+$`)
+
+type resolutionOption struct {
+	fieldValue any
+	output     string
+}
 
 // IssueListJQLFilters contains the typed filters supported by issues list.
 // Values in Labels, Components, and FixVersions are combined with IN; every
@@ -153,6 +158,23 @@ func (a *app) resolveFields(ctx context.Context, client *jira.Client, settings c
 		a.addFieldCacheWriteWarning(refreshed.path, cacheErr)
 	}
 	return resolve(refreshed.fields)
+}
+
+func parseResolutionOption(raw string, changed bool) (*resolutionOption, error) {
+	if !changed {
+		return nil, nil
+	}
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil, apperr.New(apperr.KindInvalidInput, "--resolution must not be empty")
+	}
+	if strings.EqualFold(value, "none") {
+		return &resolutionOption{fieldValue: nil, output: "none"}, nil
+	}
+	if numericJiraID.MatchString(value) {
+		return &resolutionOption{fieldValue: map[string]string{"id": value}, output: value}, nil
+	}
+	return &resolutionOption{fieldValue: map[string]string{"name": value}, output: value}, nil
 }
 
 func jqlLiteral(value string) string {
@@ -326,7 +348,7 @@ func appendSprintClause(clauses *[]string, sprint string) error {
 	case "future":
 		*clauses = append(*clauses, "sprint IN futureSprints()")
 	default:
-		if jqlSprintID.MatchString(sprint) {
+		if numericJiraID.MatchString(sprint) {
 			*clauses = append(*clauses, "sprint = "+sprint)
 			return nil
 		}
