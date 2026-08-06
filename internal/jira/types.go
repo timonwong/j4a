@@ -224,10 +224,12 @@ type Transition struct {
 }
 
 // TransitionInput moves an issue using a Jira transition ID. Fields may
-// contain values required by that transition screen.
+// contain values required by that transition screen. Comment, when present,
+// is added atomically through the same transition request.
 type TransitionInput struct {
-	ID     string         `json:"id"`
-	Fields map[string]any `json:"fields,omitempty"`
+	ID      string         `json:"id"`
+	Fields  map[string]any `json:"fields,omitempty"`
+	Comment *string        `json:"comment,omitempty"`
 }
 
 // Field is a normalized Jira field definition.

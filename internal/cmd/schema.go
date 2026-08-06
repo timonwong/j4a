@@ -107,12 +107,12 @@ func schemaDocument() cliSchema {
 				requiredFlag("project", "p", "string"), requiredFlag("type", "t", "string"), requiredFlag("summary", "s", "string"),
 				flag("description", "", "string"), flag("description-file", "", "path-or-stdin"), flagDefault("input-format", "", "enum:jira|jfm|markdown", "jira"),
 				flag("priority", "", "string"), flag("assignee", "", "string"), repeatableFlag("label", "", "string"), flag("parent", "", "issue-key"),
-				repeatableFlag("component", "", "string"), repeatableFlag("fix-version", "", "string"), flag("sprint", "", "string"), repeatableFlag("field", "", "key=value"),
+				repeatableFlag("component", "", "string"), repeatableFlag("fix-version", "", "string"), flag("sprint", "", "string"), repeatableFlag("field", "", "custom-field-alias-or-id=value"),
 			}, object("id", "key", "sprint", "sprintMoved")),
 			commandWithFlags("issue update", nil, true, "ISSUE-KEY", []flagSchema{
 				flag("summary", "s", "string"), flag("description", "", "string"), flag("description-file", "", "path-or-stdin"),
 				flagDefault("input-format", "", "enum:jira|jfm|markdown", "jira"), flag("priority", "", "string"), flag("assignee", "", "string"),
-				repeatableFlag("label", "", "string"), repeatableFlag("component", "", "string"), repeatableFlag("fix-version", "", "string"), flag("sprint", "", "string"), repeatableFlag("field", "", "key=value"),
+				repeatableFlag("label", "", "string"), repeatableFlag("component", "", "string"), repeatableFlag("fix-version", "", "string"), flag("sprint", "", "string"), repeatableFlag("field", "", "custom-field-alias-or-id=value"),
 			}, object("key", "updated", "sprint", "sprintMoved")),
 			commandWithFlags("issue comment list", nil, false, "ISSUE-KEY", []flagSchema{
 				flagDefault("limit", "n", "integer", 50), flagDefault("offset", "", "integer", 0),
@@ -122,8 +122,10 @@ func schemaDocument() cliSchema {
 			}, object("id", "body", "author", "created")),
 			command("issue list-transitions", false, "ISSUE-KEY", object("issueKey", "transitions")),
 			commandWithFlags("issue move", nil, true, "ISSUE-KEY", []flagSchema{
-				requiredFlag("to", "", "string"), repeatableFlag("field", "", "key=value"),
-			}, object("key", "transition", "transitioned")),
+				requiredFlag("to", "", "string"), flag("comment", "", "string"),
+				flagDefault("input-format", "", "enum:jira|jfm|markdown", "jira"), flag("resolution", "", "string"),
+				repeatableFlag("field", "", "custom-field-alias-or-id=value"),
+			}, object("key", "transition", "transitioned", "commented", "resolution")),
 			commandWithFlags("issue assign", nil, true, "ISSUE-KEY", []flagSchema{
 				requiredFlag("assignee", "", "string"),
 			}, object("key", "assignee", "assigned")),
@@ -134,7 +136,8 @@ func schemaDocument() cliSchema {
 			command("issue link delete", true, "LINK-ID", object("linkId", "unlinked")),
 			command("issue link types", false, "", object("linkTypes")),
 			commandWithFlags("issue bulk move", nil, true, "", []flagSchema{
-				requiredFlag("jql", "", "string"), requiredFlag("to", "", "string"), repeatableFlag("field", "", "key=value"), flag("dry-run", "", "boolean"), flag("yes", "", "boolean"),
+				requiredFlag("jql", "", "string"), requiredFlag("to", "", "string"), flag("resolution", "", "string"),
+				repeatableFlag("field", "", "custom-field-alias-or-id=value"), flag("dry-run", "", "boolean"), flag("yes", "", "boolean"),
 			}, batchObject()),
 			commandWithFlags("issue bulk assign", nil, true, "", []flagSchema{
 				requiredFlag("jql", "", "string"), requiredFlag("assignee", "", "string"), flag("dry-run", "", "boolean"), flag("yes", "", "boolean"),
@@ -208,7 +211,7 @@ func typeDefinitions() map[string]any {
 			"type": "IssueLinkType", "otherIssue": object("id", "key", "summary"),
 		},
 		"BatchCurrent": object("status", "assignee"),
-		"BatchTarget":  object("transitionSpec", "transition", "assignee", "unassigned"),
+		"BatchTarget":  object("transitionSpec", "transition", "resolution", "assignee", "unassigned"),
 		"BatchItem":    batchItemDefinition(),
 		"BatchResult":  batchResultDefinition(),
 	}

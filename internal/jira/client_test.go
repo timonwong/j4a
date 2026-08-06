@@ -132,6 +132,48 @@ func TestSearchPaginationAndFields(t *testing.T) {
 	}
 }
 
+func TestTransitionSendsFieldsAndCommentInOneRequest(t *testing.T) {
+	t.Parallel()
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != http.MethodPost || r.URL.Path != "/rest/api/2/issue/OPS-1/transitions" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		var payload struct {
+			Transition map[string]string `json:"transition"`
+			Fields     map[string]any    `json:"fields"`
+			Update     map[string][]struct {
+				Add map[string]string `json:"add"`
+			} `json:"update"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		resolution, ok := payload.Fields["resolution"].(map[string]any)
+		if payload.Transition["id"] != "31" || !ok || resolution["name"] != "Fixed" {
+			t.Fatalf("payload = %#v", payload)
+		}
+		comments := payload.Update["comment"]
+		if len(comments) != 1 || comments[0].Add["body"] != "Deployed to staging." {
+			t.Fatalf("comment update = %#v", comments)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(Config{BaseURL: server.URL})
+	comment := "Deployed to staging."
+	err := client.Transition(context.Background(), "OPS-1", TransitionInput{
+		ID:      "31",
+		Fields:  map[string]any{"resolution": map[string]string{"name": "Fixed"}},
+		Comment: &comment,
+	})
+	if err != nil || calls != 1 {
+		t.Fatalf("Transition() error = %v, calls = %d", err, calls)
+	}
+}
+
 func TestRawRequest(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

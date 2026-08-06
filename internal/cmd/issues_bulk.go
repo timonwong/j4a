@@ -40,12 +40,13 @@ type issueBatchCurrent struct {
 type issueBatchTarget struct {
 	TransitionSpec string           `json:"transitionSpec,omitempty"`
 	Transition     *jira.Transition `json:"transition,omitempty"`
+	Resolution     string           `json:"resolution,omitempty"`
 	Assignee       *string          `json:"assignee,omitempty"`
 	Unassigned     bool             `json:"unassigned,omitempty"`
 }
 
 func (a *app) issueBulkTransitionCommand() *cobra.Command {
-	var jql, target string
+	var jql, target, resolution string
 	var fields []string
 	var dryRun, yes bool
 	command := &cobra.Command{
@@ -59,9 +60,12 @@ func (a *app) issueBulkTransitionCommand() *cobra.Command {
 			if dryRun == yes {
 				return apperr.New(apperr.KindInvalidInput, "exactly one of --dry-run or --yes is required")
 			}
+			resolutionValue, err := parseResolutionOption(resolution, command.Flags().Changed("resolution"))
+			if err != nil {
+				return err
+			}
 			var client *jira.Client
 			var settings config.Settings
-			var err error
 			if dryRun {
 				client, settings, err = a.client()
 			} else {
@@ -85,11 +89,18 @@ func (a *app) issueBulkTransitionCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if resolutionValue != nil {
+				resolvedFields["resolution"] = resolutionValue.fieldValue
+			}
+			batchTarget := issueBatchTarget{TransitionSpec: target}
+			if resolutionValue != nil {
+				batchTarget.Resolution = resolutionValue.output
+			}
 			for index, issue := range issues.Issues {
 				item := issueBatchItem{
 					IssueKey: issue.Key,
 					Current:  issueBatchCurrent{Status: issue.Status},
-					Target:   issueBatchTarget{TransitionSpec: target},
+					Target:   batchTarget,
 				}
 				transitions, transitionErr := client.ListTransitions(command.Context(), issue.Key)
 				if transitionErr == nil {
@@ -115,7 +126,7 @@ func (a *app) issueBulkTransitionCommand() *cobra.Command {
 					result.Failed++
 					result.Items = append(result.Items, item)
 					if isSystemicIssueError(transitionErr) {
-						appendNotAttempted(&result, issues.Issues[index+1:], issueBatchTarget{TransitionSpec: target}, transitionErr.Error())
+						appendNotAttempted(&result, issues.Issues[index+1:], batchTarget, transitionErr.Error())
 						break
 					}
 					continue
@@ -128,8 +139,9 @@ func (a *app) issueBulkTransitionCommand() *cobra.Command {
 	flags := command.Flags()
 	flags.StringVar(&jql, "jql", "", "JQL selecting every issue to process")
 	flags.StringVar(&target, "to", "", "transition ID, name, or destination status")
-	flags.StringArrayVar(&fields, "field", nil, "transition field as key=value; repeatable")
-	flags.BoolVar(&dryRun, "dry-run", false, "preflight every matching issue without changing Jira")
+	flags.StringVar(&resolution, "resolution", "", "resolution name or numeric ID; use none to clear")
+	flags.StringArrayVar(&fields, "field", nil, "custom field as alias=value or customfield_N=value; repeatable")
+	flags.BoolVar(&dryRun, "dry-run", false, "preflight transition availability without validating fields or changing Jira")
 	flags.BoolVar(&yes, "yes", false, "confirm execution without prompting")
 	return command
 }

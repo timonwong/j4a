@@ -8,7 +8,7 @@ For a Jira mutation, use this branch together with the core `inspect -> prefligh
 
 - Jira Markup is the byte-preserving default for Description and Comment Body input.
 - Use the canonical `--input-format=jfm` value for JFM. `markdown` is a permanent, warning-free compatibility alias, but generate new commands with `jfm`.
-- Use `--input-format` only where the current schema and command help expose it: Issue creation, Issue update, and Comment creation. Custom fields retain their declared Jira value contract.
+- Use `--input-format` only where the current schema and command help expose it: Issue creation, Issue update, Comment creation, and the inline transition comment on `issue move`. Custom fields retain their declared Jira value contract.
 - Treat Jira Markup as the only typed Issue and Comment read representation; the current contract has no JFM projection flags or sibling fields such as `--jfm`, `descriptionJfm`, or `bodyJfm`.
 
 ## Supply JFM to a Jira mutation
@@ -20,9 +20,11 @@ jiro issue add --project OPS --type Task --summary "Document rollout" \
   --description-file issue.md --input-format=jfm --output=json
 jiro issue update OPS-42 --description-file issue.md --input-format=jfm --output=json
 jiro issue comment add OPS-42 --body-file comment.md --input-format=jfm --output=json
+jiro issue move OPS-42 --to Done --comment "**Verified** in staging." \
+  --input-format=jfm --resolution Fixed --output=json
 ```
 
-Keep inline and file inputs mutually exclusive. Use `-` as the file value to read long input from stdin.
+Keep inline and file inputs mutually exclusive. Use `-` as the file value to read long input from stdin. `issue move --comment` is inline-only, and an explicitly supplied `--input-format` without `--comment` is invalid.
 
 JFM conversion is best-effort. Conversion warnings retain every target-representable semantic, keep the mutation successful, and use code `jfm_conversion`. In JSON output, inspect `warnings[].details.direction`, `field`, `line`, `column`, `construct`, and `reason`; in text output, preserve stderr alongside the successful result. A fatal conversion failure stops before the Jira write and returns no successful mutation result.
 
